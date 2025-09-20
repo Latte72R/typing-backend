@@ -2,6 +2,7 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import fastifyJwt from '@fastify/jwt';
 import Fastify from 'fastify';
+import type { FastifyError } from 'fastify';
 import { serializerCompiler, validatorCompiler, type ZodTypeProvider } from 'fastify-type-provider-zod';
 import { Server as SocketIOServer } from 'socket.io';
 
@@ -95,6 +96,33 @@ export async function buildServer({ config, dependencies }: BuildServerOptions):
   await fastify.register(registerContestRoutes, { prefix: '/api/v1' });
   await fastify.register(registerSessionRoutes, { prefix: '/api/v1' });
   await fastify.register(registerPromptRoutes, { prefix: '/api/v1' });
+
+  type FastifyValidationIssue = {
+    instancePath?: string;
+    keyword?: string;
+    params?: Record<string, unknown>;
+  };
+
+  type FastifyValidationError = FastifyError & {
+    validation?: FastifyValidationIssue[];
+    validationContext?: string;
+  };
+
+  fastify.setErrorHandler((error, request, reply) => {
+    const validationError = error as FastifyValidationError;
+    if (validationError.validation && validationError.validationContext === 'params') {
+      const invalidUuid = validationError.validation.find((issue) => issue.keyword === 'invalid_format' && issue.params?.format === 'uuid');
+      if (invalidUuid) {
+        const rawPath = invalidUuid.instancePath ?? '';
+        const paramName = rawPath.startsWith('/') ? rawPath.slice(1) : rawPath;
+        const label = paramName !== '' ? paramName : 'ID';
+        return reply.status(400).send({ message: `${label} は UUID 形式で指定してください。` });
+      }
+    }
+    const statusCode = (error as FastifyError).statusCode ?? 500;
+    const message = (error as FastifyError).message ?? '予期せぬエラーが発生しました。';
+    return reply.status(statusCode).send({ message });
+  });
 
   fastify.addHook('onClose', async () => {
     io.close();

@@ -26,12 +26,13 @@ e-typing 風タイピングゲームのバックエンドです。ドメイン�
    ```
    - マイグレーション適用時に管理者ユーザーが存在しない場合、自動で `ADMIN_*` の値を使って1件作成します。
    - パスワードは初期化直後に必ず変更してください。
-3. Prisma でスキーマを適用
+3. Prisma Client を生成
    ```bash
-   npx prisma migrate dev --name init  # 開発で初期マイグレーションを作成・適用
-   npx prisma generate                  # Prisma Client を生成
-   npx prisma migrate deploy            # CI / 本番でマイグレーションを適用
+   npx prisma generate
    ```
+   - サーバー起動時に `src/db/migrations.ts` が自動で実行され、テーブルが存在しない場合は作成されます。
+   - 管理者ユーザーが存在しない場合は `ADMIN_*` の環境変数を元に1件自動作成されます。
+   - Prisma のスキーマを変更した際は、必要に応じて `npx prisma migrate dev` などでマイグレーションファイルを作成してください。
 
 ## Docker で PostgreSQL を使う
 

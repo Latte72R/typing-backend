@@ -1,5 +1,6 @@
-import type { FastifyPluginAsync } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
+import type { FastifyZodPlugin } from '../fastifyTypes.js';
 
 const promptResponseSchema = z.object({
   id: z.string().uuid(),
@@ -27,6 +28,14 @@ const listPromptQuerySchema = z.object({
   active: z.coerce.boolean().optional()
 });
 
+const messageResponseSchema = z.object({ message: z.string() });
+const promptIdParamSchema = z.object({ promptId: z.string().uuid() });
+
+type CreatePromptBody = z.infer<typeof createPromptBodySchema>;
+type UpdatePromptBody = z.infer<typeof updatePromptBodySchema>;
+type ListPromptQuery = z.infer<typeof listPromptQuerySchema>;
+type PromptIdParams = z.infer<typeof promptIdParamSchema>;
+
 function toPrismaLanguage(language: 'romaji' | 'english' | 'kana') {
   if (language === 'english') return 'ENGLISH';
   if (language === 'kana') return 'KANA';
@@ -45,8 +54,10 @@ function toPromptResponse(prompt: { id: string; language: string; displayText: s
   };
 }
 
-export const registerPromptRoutes: FastifyPluginAsync = async (fastify) => {
-  fastify.post('/prompts', {
+export const registerPromptRoutes: FastifyZodPlugin = async (fastify) => {
+  const app = fastify.withTypeProvider<ZodTypeProvider>();
+
+  app.post('/prompts', {
     preHandler: fastify.authorizeAdmin,
     schema: {
       body: createPromptBodySchema,
@@ -56,7 +67,7 @@ export const registerPromptRoutes: FastifyPluginAsync = async (fastify) => {
     }
   }, async (request, reply) => {
     const { prisma } = fastify.deps;
-    const body = request.body;
+    const body = request.body as CreatePromptBody;
     const prompt = await prisma.prompt.create({
       data: {
         language: toPrismaLanguage(body.language),
@@ -68,7 +79,7 @@ export const registerPromptRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.code(201).send({ prompt: toPromptResponse(prompt) });
   });
 
-  fastify.get('/prompts', {
+  app.get('/prompts', {
     preHandler: fastify.authorizeAdmin,
     schema: {
       querystring: listPromptQuerySchema,
@@ -78,10 +89,11 @@ export const registerPromptRoutes: FastifyPluginAsync = async (fastify) => {
     }
   }, async (request) => {
     const { prisma } = fastify.deps;
+    const query = request.query as ListPromptQuery;
     const prompts = await prisma.prompt.findMany({
       where: {
-        language: request.query.language ? toPrismaLanguage(request.query.language) : undefined,
-        isActive: request.query.active
+        language: query.language ? toPrismaLanguage(query.language) : undefined,
+        isActive: query.active
       },
       orderBy: { createdAt: 'desc' }
     });
@@ -90,46 +102,48 @@ export const registerPromptRoutes: FastifyPluginAsync = async (fastify) => {
     };
   });
 
-  fastify.patch('/prompts/:promptId', {
+  app.patch('/prompts/:promptId', {
     preHandler: fastify.authorizeAdmin,
     schema: {
-      params: z.object({ promptId: z.string().uuid() }),
+      params: promptIdParamSchema,
       body: updatePromptBodySchema,
       response: {
-        200: z.object({ prompt: promptResponseSchema })
+        200: z.object({ prompt: promptResponseSchema }),
+        404: messageResponseSchema
       }
     }
   }, async (request, reply) => {
     const { prisma } = fastify.deps;
-    const { promptId } = request.params;
+    const { promptId } = request.params as PromptIdParams;
     const prompt = await prisma.prompt.findUnique({ where: { id: promptId } });
     if (!prompt) {
       return reply.code(404).send({ message: 'プロンプトが見つかりません。' });
     }
+    const body = request.body as UpdatePromptBody;
     const updated = await prisma.prompt.update({
       where: { id: promptId },
       data: {
-        language: request.body.language ? toPrismaLanguage(request.body.language) : prompt.language,
-        displayText: request.body.displayText ?? prompt.displayText,
-        typingTarget: request.body.typingTarget ?? prompt.typingTarget,
-        tags: request.body.tags ?? prompt.tags,
-        isActive: request.body.isActive ?? prompt.isActive
+        language: body.language ? toPrismaLanguage(body.language) : prompt.language,
+        displayText: body.displayText ?? prompt.displayText,
+        typingTarget: body.typingTarget ?? prompt.typingTarget,
+        tags: body.tags ?? prompt.tags,
+        isActive: body.isActive ?? prompt.isActive
       }
     });
     return reply.send({ prompt: toPromptResponse(updated) });
   });
 
-  fastify.delete('/prompts/:promptId', {
+  app.delete('/prompts/:promptId', {
     preHandler: fastify.authorizeAdmin,
     schema: {
-      params: z.object({ promptId: z.string().uuid() }),
+      params: promptIdParamSchema,
       response: {
         204: z.null()
       }
     }
   }, async (request, reply) => {
     const { prisma } = fastify.deps;
-    const { promptId } = request.params;
+    const { promptId } = request.params as PromptIdParams;
     await prisma.prompt.delete({ where: { id: promptId } }).catch(() => {
       // ignore missing rows to keep idempotent
     });

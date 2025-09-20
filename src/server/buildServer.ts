@@ -1,18 +1,19 @@
-import Fastify, { type FastifyInstance, type FastifyPluginAsync } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import fastifyJwt from '@fastify/jwt';
-import fastifySocketIo from '@fastify/socket.io';
-import { ZodTypeProvider } from 'fastify-type-provider-zod';
+import Fastify from 'fastify';
+import { serializerCompiler, validatorCompiler, type ZodTypeProvider } from 'fastify-type-provider-zod';
+import { Server as SocketIOServer } from 'socket.io';
 
 import type { ServerConfig } from './config.js';
 import type { ServerDependencies } from './dependencies.js';
+import type { FastifyZodInstance, FastifyZodPlugin } from './fastifyTypes.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerContestRoutes } from './routes/contests.js';
-import { registerSessionRoutes } from './routes/sessions.js';
 import { registerPromptRoutes } from './routes/prompts.js';
+import { registerSessionRoutes } from './routes/sessions.js';
 
-const authenticate: FastifyPluginAsync = async (fastify) => {
+const authenticate: FastifyZodPlugin = async (fastify) => {
   fastify.decorate('authenticate', async (request, reply) => {
     try {
       await request.jwtVerify();
@@ -24,7 +25,7 @@ const authenticate: FastifyPluginAsync = async (fastify) => {
   });
 };
 
-const authorizeAdmin: FastifyPluginAsync = async (fastify) => {
+const authorizeAdmin: FastifyZodPlugin = async (fastify) => {
   fastify.decorate('authorizeAdmin', async (request, reply) => {
     try {
       await request.jwtVerify();
@@ -45,10 +46,13 @@ export interface BuildServerOptions {
   dependencies: ServerDependencies;
 }
 
-export async function buildServer({ config, dependencies }: BuildServerOptions): Promise<FastifyInstance> {
+export async function buildServer({ config, dependencies }: BuildServerOptions): Promise<FastifyZodInstance> {
   const fastify = Fastify({
     logger: config.env !== 'test'
   }).withTypeProvider<ZodTypeProvider>();
+
+  fastify.setValidatorCompiler(validatorCompiler);
+  fastify.setSerializerCompiler(serializerCompiler);
 
   fastify.decorate('deps', dependencies);
   fastify.decorate('config', config);
@@ -68,13 +72,15 @@ export async function buildServer({ config, dependencies }: BuildServerOptions):
   });
   await fastify.register(authenticate);
   await fastify.register(authorizeAdmin);
-  await fastify.register(fastifySocketIo, {
+  const io = new SocketIOServer(fastify.server, {
     cors: {
       origin: config.socketCorsOrigins ?? config.corsOrigins ?? true
     }
   });
 
-  fastify.io.on('connection', (socket) => {
+  fastify.decorate('io', io);
+
+  io.on('connection', (socket) => {
     socket.on('contest:join', ({ contestId }: { contestId: string }) => {
       if (!contestId) return;
       socket.join(`contest:${contestId}:leaderboard`);
@@ -91,6 +97,7 @@ export async function buildServer({ config, dependencies }: BuildServerOptions):
   await fastify.register(registerPromptRoutes, { prefix: '/api/v1' });
 
   fastify.addHook('onClose', async () => {
+    io.close();
     await dependencies.prisma.$disconnect();
   });
 

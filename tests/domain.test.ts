@@ -1,25 +1,24 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-
-import {
-  calculateTypingStats,
-  compareReportedStats,
-  formatStats,
-  getContestStatus,
-  isLeaderboardVisible,
-  validateSessionStart,
-  requiresJoinCode,
-  remainingAttempts,
-  replayKeylog,
-  analyseIntervals,
-  evaluateSessionFinish,
-  buildLeaderboard,
-  extractPersonalRank
-} from '../src/index.js';
+import test from 'node:test';
 import type {
   Contest,
   LeaderboardSession,
   SessionFinishPayload
+} from '../src/index.js';
+import {
+  analyseIntervals,
+  buildLeaderboard,
+  calculateTypingStats,
+  compareReportedStats,
+  evaluateSessionFinish,
+  extractPersonalRank, 
+  formatStats,
+  getContestStatus,
+  isLeaderboardVisible,
+  remainingAttempts,
+  replayKeylog,
+  requiresJoinCode,
+  validateSessionStart
 } from '../src/index.js';
 
 test('calculateTypingStats: 正確な計算が行われる', () => {

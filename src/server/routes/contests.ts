@@ -1,9 +1,16 @@
-import type { FastifyPluginAsync } from 'fastify';
-import { Prisma, type Contest as PrismaContest } from '@prisma/client';
+import {
+  type Contest as PrismaContest,
+  type ContestLanguage as PrismaContestLanguage,
+  type ContestVisibility as PrismaContestVisibility,
+  type LeaderboardVisibility as PrismaLeaderboardVisibility,
+  SessionStatus as PrismaSessionStatus
+} from '@prisma/client';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 
-import { getContestStatus, isLeaderboardVisible, requiresJoinCode, type ContestStatus } from '../../domain/contest.js';
+import { type ContestStatus, getContestStatus, isLeaderboardVisible, requiresJoinCode } from '../../domain/contest.js';
 import { buildLeaderboard, extractPersonalRank } from '../../domain/leaderboard.js';
+import type { FastifyZodPlugin } from '../fastifyTypes.js';
 
 type ContestVisibility = 'public' | 'private';
 type LeaderboardVisibility = 'during' | 'after' | 'hidden';
@@ -59,17 +66,27 @@ const joinContestBodySchema = z.object({
   joinCode: z.string().optional()
 });
 
-function toPrismaVisibility(value: ContestVisibility): Prisma.ContestVisibility {
+const messageResponseSchema = z.object({ message: z.string() });
+
+const contestIdParamSchema = z.object({ contestId: z.string().uuid() });
+type ContestQuery = z.infer<typeof contestQuerySchema>;
+type ContestBody = z.infer<typeof contestBodySchema>;
+type UpdateContestBody = z.infer<typeof updateContestBodySchema>;
+type UpdatePromptsBody = z.infer<typeof updatePromptsBodySchema>;
+type JoinContestBody = z.infer<typeof joinContestBodySchema>;
+type ContestIdParams = z.infer<typeof contestIdParamSchema>;
+
+function toPrismaVisibility(value: ContestVisibility): PrismaContestVisibility {
   return value === 'public' ? 'PUBLIC' : 'PRIVATE';
 }
 
-function toPrismaLeaderboardVisibility(value: LeaderboardVisibility): Prisma.LeaderboardVisibility {
+function toPrismaLeaderboardVisibility(value: LeaderboardVisibility): PrismaLeaderboardVisibility {
   if (value === 'during') return 'DURING';
   if (value === 'after') return 'AFTER';
   return 'HIDDEN';
 }
 
-function toPrismaLanguage(value: string): Prisma.ContestLanguage {
+function toPrismaLanguage(value: string): PrismaContestLanguage {
   if (value === 'romaji') return 'ROMAJI';
   if (value === 'english') return 'ENGLISH';
   return 'KANA';
@@ -101,8 +118,10 @@ function toContestResponse(contest: PrismaContest, status: ContestStatus, includ
   };
 }
 
-export const registerContestRoutes: FastifyPluginAsync = async (fastify) => {
-  fastify.get('/contests', {
+export const registerContestRoutes: FastifyZodPlugin = async (fastify) => {
+  const app = fastify.withTypeProvider<ZodTypeProvider>();
+
+  app.get('/contests', {
     schema: {
       querystring: contestQuerySchema,
       response: {
@@ -113,26 +132,28 @@ export const registerContestRoutes: FastifyPluginAsync = async (fastify) => {
     }
   }, async (request) => {
     const { prisma } = fastify.deps;
+    const query = request.query as ContestQuery;
     const contests = await prisma.contest.findMany({ orderBy: { startsAt: 'asc' } });
     const now = new Date();
     const results = contests.map((contest) => {
       const status = getContestStatus(toDomainContest(contest), now);
       return toContestResponse(contest, status, false);
     });
-    const filtered = request.query.status ? results.filter((contest) => contest.status === request.query.status) : results;
+    const filtered = query.status ? results.filter((contest) => contest.status === query.status) : results;
     return { contests: filtered };
   });
 
-  fastify.post('/contests', {
+  app.post('/contests', {
     preHandler: fastify.authorizeAdmin,
     schema: {
       body: contestBodySchema,
       response: {
-        201: z.object({ contest: contestResponseSchema })
+        201: z.object({ contest: contestResponseSchema }),
+        400: messageResponseSchema
       }
     }
   }, async (request, reply) => {
-    const body = request.body;
+    const body = request.body as ContestBody;
     if (body.visibility === 'private' && !body.joinCode) {
       return reply.code(400).send({ message: '非公開コンテストには joinCode が必要です。' });
     }
@@ -171,18 +192,20 @@ export const registerContestRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.code(201).send({ contest: toContestResponse(contest, status, true) });
   });
 
-  fastify.patch('/contests/:contestId', {
+  app.patch('/contests/:contestId', {
     preHandler: fastify.authorizeAdmin,
     schema: {
       body: updateContestBodySchema,
-      params: z.object({ contestId: z.string().uuid() }),
+      params: contestIdParamSchema,
       response: {
-        200: z.object({ contest: contestResponseSchema })
+        200: z.object({ contest: contestResponseSchema }),
+        400: messageResponseSchema,
+        404: messageResponseSchema
       }
     }
   }, async (request, reply) => {
-    const { contestId } = request.params;
-    const body = request.body;
+    const { contestId } = request.params as ContestIdParams;
+    const body = request.body as UpdateContestBody;
     const { prisma } = fastify.deps;
     const contest = await prisma.contest.findUnique({ where: { id: contestId } });
     if (!contest) {
@@ -222,26 +245,28 @@ export const registerContestRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.send({ contest: toContestResponse(updated, status, true) });
   });
 
-  fastify.post('/contests/:contestId/prompts', {
+  app.post('/contests/:contestId/prompts', {
     preHandler: fastify.authorizeAdmin,
     schema: {
-      params: z.object({ contestId: z.string().uuid() }),
+      params: contestIdParamSchema,
       body: updatePromptsBodySchema,
       response: {
-        204: z.null()
+        204: z.null(),
+        404: messageResponseSchema
       }
     }
   }, async (request, reply) => {
-    const { contestId } = request.params;
+    const { contestId } = request.params as ContestIdParams;
     const { prisma } = fastify.deps;
     const contest = await prisma.contest.findUnique({ where: { id: contestId } });
     if (!contest) {
       return reply.code(404).send({ message: 'コンテストが見つかりません。' });
     }
+    const body = request.body as UpdatePromptsBody;
     await prisma.$transaction(async (tx) => {
       await tx.contestPrompt.deleteMany({ where: { contestId } });
       await tx.contestPrompt.createMany({
-        data: request.body.prompts.map((prompt, index) => ({
+        data: body.prompts.map((prompt, index) => ({
           contestId,
           promptId: prompt.promptId,
           orderIndex: prompt.orderIndex ?? index
@@ -251,25 +276,28 @@ export const registerContestRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.code(204).send();
   });
 
-  fastify.post('/contests/:contestId/join', {
+  app.post('/contests/:contestId/join', {
     preHandler: fastify.authenticate,
     schema: {
-      params: z.object({ contestId: z.string().uuid() }),
+      params: contestIdParamSchema,
       body: joinContestBodySchema,
       response: {
-        204: z.null()
+        204: z.null(),
+        403: messageResponseSchema,
+        404: messageResponseSchema
       }
     }
   }, async (request, reply) => {
-    const { contestId } = request.params;
+    const { contestId } = request.params as ContestIdParams;
     const { prisma } = fastify.deps;
     const contest = await prisma.contest.findUnique({ where: { id: contestId } });
     if (!contest) {
       return reply.code(404).send({ message: 'コンテストが見つかりません。' });
     }
     const domainContest = toDomainContest(contest);
+    const body = request.body as JoinContestBody;
     if (requiresJoinCode(domainContest)) {
-      if (!request.body.joinCode || request.body.joinCode !== contest.joinCode) {
+      if (!body.joinCode || body.joinCode !== contest.joinCode) {
         return reply.code(403).send({ message: 'このコンテストには正しい参加コードが必要です。' });
       }
     }
@@ -289,10 +317,10 @@ export const registerContestRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.code(204).send();
   });
 
-  fastify.get('/contests/:contestId/leaderboard', {
+  app.get('/contests/:contestId/leaderboard', {
     preHandler: fastify.authenticate,
     schema: {
-      params: z.object({ contestId: z.string().uuid() }),
+      params: contestIdParamSchema,
       response: {
         200: z.object({
           top: z.array(z.object({
@@ -316,11 +344,13 @@ export const registerContestRoutes: FastifyPluginAsync = async (fastify) => {
             endedAt: z.string(),
             rank: z.number()
           }).nullable()
-        })
+        }),
+        403: messageResponseSchema,
+        404: messageResponseSchema
       }
     }
   }, async (request, reply) => {
-    const { contestId } = request.params;
+    const { contestId } = request.params as ContestIdParams;
     const { prisma, store } = fastify.deps;
     const contest = await prisma.contest.findUnique({ where: { id: contestId } });
     if (!contest) {
@@ -340,29 +370,30 @@ export const registerContestRoutes: FastifyPluginAsync = async (fastify) => {
     };
   });
 
-  fastify.get('/contests/:contestId/live', {
+  app.get('/contests/:contestId/live', {
     preHandler: fastify.authorizeAdmin,
     schema: {
-      params: z.object({ contestId: z.string().uuid() }),
+      params: contestIdParamSchema,
       response: {
         200: z.object({
           contestId: z.string().uuid(),
           totalEntries: z.number(),
           runningSessions: z.number(),
           flaggedSessions: z.number()
-        })
+        }),
+        404: messageResponseSchema
       }
     }
   }, async (request, reply) => {
-    const { contestId } = request.params;
+    const { contestId } = request.params as ContestIdParams;
     const { prisma } = fastify.deps;
     const contest = await prisma.contest.findUnique({ where: { id: contestId } });
     if (!contest) {
       return reply.code(404).send({ message: 'コンテストが見つかりません。' });
     }
     const totalEntries = await prisma.entry.count({ where: { contestId } });
-    const runningSessions = await prisma.session.count({ where: { contestId, status: 'RUNNING' } });
-    const flaggedSessions = await prisma.session.count({ where: { contestId, status: 'DQ' } });
+    const runningSessions = await prisma.session.count({ where: { contestId, status: PrismaSessionStatus.RUNNING } });
+    const flaggedSessions = await prisma.session.count({ where: { contestId, status: PrismaSessionStatus.DQ } });
     return reply.send({
       contestId,
       totalEntries,

@@ -1,5 +1,5 @@
-import { calculateTypingStats, compareReportedStats, type TypingStats } from './scoring.js';
 import type { Contest, ContestEntry } from './contest.js';
+import { calculateTypingStats, compareReportedStats, type TypingStats } from './scoring.js';
 
 const BACKSPACE_KEYS = new Set(['Backspace', 'BACKSPACE', 'BackspaceKey', 'KeyBackspace']);
 const MAX_KEYSTROKES = 2000;

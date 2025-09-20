@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
-import bcrypt from 'bcryptjs';
 import type { PrismaClient } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 
 type HashFn = (token: string) => string;
 

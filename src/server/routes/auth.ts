@@ -1,6 +1,8 @@
-import type { FastifyPluginAsync } from 'fastify';
 import { Prisma } from '@prisma/client';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
+
+import type { FastifyZodPlugin } from '../fastifyTypes.js';
 
 const authPayloadSchema = z.object({
   accessToken: z.string(),
@@ -30,20 +32,32 @@ const refreshBodySchema = z.object({
 
 const signoutBodySchema = refreshBodySchema.partial();
 
+const errorResponseSchema = z.object({
+  message: z.string()
+});
+
+type SignupBody = z.infer<typeof signupBodySchema>;
+type SigninBody = z.infer<typeof signinBodySchema>;
+type RefreshBody = z.infer<typeof refreshBodySchema>;
+type SignoutBody = z.infer<typeof signoutBodySchema>;
+
 function prismaIsUniqueError(error: unknown): error is Prisma.PrismaClientKnownRequestError {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
 }
 
-export const registerAuthRoutes: FastifyPluginAsync = async (fastify) => {
-  fastify.post('/auth/signup', {
+export const registerAuthRoutes: FastifyZodPlugin = async (fastify) => {
+  const app = fastify.withTypeProvider<ZodTypeProvider>();
+
+  app.post('/auth/signup', {
     schema: {
       body: signupBodySchema,
       response: {
-        201: authPayloadSchema
+        201: authPayloadSchema,
+        409: errorResponseSchema
       }
     }
   }, async (request, reply) => {
-    const body = request.body;
+    const body = request.body as SignupBody;
     const { store, auth, prisma } = fastify.deps;
     const existingUser = await prisma.user.findFirst({
       where: {
@@ -80,15 +94,16 @@ export const registerAuthRoutes: FastifyPluginAsync = async (fastify) => {
     }
   });
 
-  fastify.post('/auth/signin', {
+  app.post('/auth/signin', {
     schema: {
       body: signinBodySchema,
       response: {
-        200: authPayloadSchema
+        200: authPayloadSchema,
+        401: errorResponseSchema
       }
     }
   }, async (request, reply) => {
-    const body = request.body;
+    const body = request.body as SigninBody;
     const { store, auth } = fastify.deps;
     const user = await store.findUserByEmail(body.email);
     if (!user) {
@@ -112,15 +127,16 @@ export const registerAuthRoutes: FastifyPluginAsync = async (fastify) => {
     });
   });
 
-  fastify.post('/auth/refresh', {
+  app.post('/auth/refresh', {
     schema: {
       body: refreshBodySchema,
       response: {
-        200: authPayloadSchema
+        200: authPayloadSchema,
+        401: errorResponseSchema
       }
     }
   }, async (request, reply) => {
-    const body = request.body;
+    const body = request.body as RefreshBody;
     const rotation = await fastify.deps.auth.rotateRefreshToken(body.refreshToken);
     if (!rotation) {
       return reply.code(401).send({ message: 'リフレッシュトークンが無効です。' });
@@ -143,7 +159,7 @@ export const registerAuthRoutes: FastifyPluginAsync = async (fastify) => {
     });
   });
 
-  fastify.post('/auth/signout', {
+  app.post('/auth/signout', {
     schema: {
       body: signoutBodySchema,
       response: {
@@ -151,7 +167,7 @@ export const registerAuthRoutes: FastifyPluginAsync = async (fastify) => {
       }
     }
   }, async (request, reply) => {
-    const body = request.body;
+    const body = request.body as SignoutBody | undefined;
     if (body?.refreshToken) {
       await fastify.deps.auth.revokeRefreshToken(body.refreshToken);
     } else if (request.headers.authorization) {

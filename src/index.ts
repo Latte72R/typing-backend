@@ -1,85 +1,80 @@
-export {
-  calculateTypingStats,
-  compareReportedStats,
-  formatStats
-} from './domain/scoring.js';
 export type {
-  TypingStats,
-  ReportedStats,
-  StatTolerance,
-  ComparisonResult,
-  FormattedStats
-} from './domain/scoring.js';
-
+  DatabaseClient,
+  DatabasePool,
+  ResolvedDatabaseConfig
+} from './db/client.js';
 export {
-  getContestStatus,
-  isLeaderboardVisible,
-  validateSessionStart,
-  requiresJoinCode,
-  remainingAttempts
-} from './domain/contest.js';
+  createPool,
+  resolveDatabaseConfig,
+  withTransaction
+} from './db/client.js';
+export { applyMigrations } from './db/migrations.js';
 export type {
   Contest,
-  ContestStatus,
   ContestEntry,
+  ContestStatus,
   ContestVisibility,
   LeaderboardVisibility,
   SessionStartValidation
 } from './domain/contest.js';
-
 export {
-  replayKeylog,
-  analyseIntervals,
-  evaluateSessionFinish
-} from './domain/session.js';
+  getContestStatus,
+  isLeaderboardVisible,
+  remainingAttempts, 
+  requiresJoinCode,
+  validateSessionStart
+} from './domain/contest.js';
 export type {
-  KeylogEntry,
-  ReplayResult,
-  IntervalAnalysis,
-  SessionFinishPayload,
-  SessionFinishParams,
-  SessionFinishResult
-} from './domain/session.js';
+  LeaderboardResult, 
+  LeaderboardSession,
+  LeaderboardSummary,
+  RankedSession
+} from './domain/leaderboard.js';
 
 export {
   buildLeaderboard,
   extractPersonalRank
 } from './domain/leaderboard.js';
 export type {
-  LeaderboardSession,
-  RankedSession,
-  LeaderboardSummary,
-  LeaderboardResult
-} from './domain/leaderboard.js';
-
+  ComparisonResult,
+  FormattedStats, 
+  ReportedStats,
+  StatTolerance,
+  TypingStats
+} from './domain/scoring.js';
 export {
-  createPool,
-  resolveDatabaseConfig,
-  withTransaction
-} from './db/client.js';
+  calculateTypingStats,
+  compareReportedStats,
+  formatStats
+} from './domain/scoring.js';
 export type {
-  DatabasePool,
-  DatabaseClient,
-  ResolvedDatabaseConfig
-} from './db/client.js';
-export { applyMigrations } from './db/migrations.js';
-
+  IntervalAnalysis,
+  KeylogEntry,
+  ReplayResult,
+  SessionFinishParams,
+  SessionFinishPayload,
+  SessionFinishResult
+} from './domain/session.js';
 export {
-  TypingStore,
-  NotFoundError,
-  ValidationError,
-  ConflictError
-} from './services/typingStore.js';
+  analyseIntervals,
+  evaluateSessionFinish, 
+  replayKeylog
+} from './domain/session.js';
+export { buildServer } from './server/buildServer.js';
+export { getServerConfig } from './server/config.js';
+export { createDependencies } from './server/dependencies.js';
 export type {
-  UserRecord,
   CreateUserInput,
+  FinishSessionOptions,
+  FinishSessionResult, 
   PromptDto,
   StartSessionOptions,
   StartSessionResult,
-  FinishSessionOptions,
-  FinishSessionResult
+  UserRecord
 } from './services/typingStore.js';
-
-export { getServerConfig } from './server/config.js';
-export { createDependencies } from './server/dependencies.js';
-export { buildServer } from './server/buildServer.js';
+export {
+  ConflictError, 
+  NotFoundError,
+  TypingStore,
+  ValidationError
+} from './services/typingStore.js';

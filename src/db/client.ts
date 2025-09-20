@@ -1,4 +1,4 @@
-import { Pool, PoolClient, type PoolConfig } from 'pg';
+import { Pool, type PoolClient, type PoolConfig } from 'pg';
 import { z } from 'zod';
 
 const envConfigSchema = z.object({

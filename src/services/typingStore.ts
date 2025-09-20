@@ -1,23 +1,25 @@
 import { randomUUID } from 'node:crypto';
 import {
-  Prisma,
-  PrismaClient,
-  type Contest as PrismaContest,
   type ContestPrompt,
-  type Entry as PrismaEntry,
   type Keystroke,
+  Prisma,
+  type PrismaClient,
+  type Contest as PrismaContest,
+  type Entry as PrismaEntry,
   type Prompt as PrismaPrompt,
-  type Session as PrismaSession
+  type Session as PrismaSession,
+  SessionStatus as PrismaSessionStatus,
+  type UserRole as PrismaUserRole
 } from '@prisma/client';
 
-import { remainingAttempts, validateSessionStart, type Contest } from '../domain/contest.js';
+import { type Contest, remainingAttempts, validateSessionStart } from '../domain/contest.js';
+import type { LeaderboardSession } from '../domain/leaderboard.js';
+import type { TypingStats } from '../domain/scoring.js';
 import {
   evaluateSessionFinish,
   type SessionFinishPayload,
   type SessionFinishResult
 } from '../domain/session.js';
-import type { LeaderboardSession } from '../domain/leaderboard.js';
-import type { TypingStats } from '../domain/scoring.js';
 
 export interface UserRecord {
   id: string;
@@ -174,7 +176,7 @@ function normalizeStats(stats: TypingStats): { cpm: number; wpm: number; accurac
   };
 }
 
-function toSessionStatus(value: 'finished' | 'expired' | 'dq'): Prisma.SessionStatus {
+function toSessionStatus(value: 'finished' | 'expired' | 'dq'): PrismaSessionStatus {
   switch (value) {
     case 'finished':
       return 'FINISHED';
@@ -224,7 +226,7 @@ export class TypingStore {
         username: input.username,
         email: input.email,
         passwordHash: input.passwordHash,
-        role: (input.role ?? 'user').toUpperCase() as Prisma.UserRole
+        role: (input.role ?? 'user').toUpperCase() as PrismaUserRole
       }
     });
     return {
@@ -311,7 +313,7 @@ export class TypingStore {
           contestId: options.contestId,
           promptId: prompt.id,
           startedAt: now,
-          status: 'RUNNING'
+          status: PrismaSessionStatus.RUNNING
         }
       });
       const updatedEntry = await tx.entry.update({
@@ -349,7 +351,7 @@ export class TypingStore {
       if (!sessionRow || sessionRow.userId !== options.userId) {
         throw new NotFoundError('セッションが見つかりません。');
       }
-      if (sessionRow.status !== 'RUNNING') {
+      if (sessionRow.status !== PrismaSessionStatus.RUNNING) {
         throw new ConflictError('このセッションはすでに完了処理が行われています。');
       }
       const contestRow = await tx.contest.findUnique({ where: { id: sessionRow.contestId } });

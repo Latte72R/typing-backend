@@ -1,8 +1,8 @@
 import { PrismaClient } from '@prisma/client';
 
 import { TypingStore } from '../services/typingStore.js';
-import { AuthService } from './services/authService.js';
 import type { ServerConfig } from './config.js';
+import { AuthService } from './services/authService.js';
 
 export interface ServerDependencies {
   prisma: PrismaClient;

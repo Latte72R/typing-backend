@@ -1,6 +1,6 @@
+import { buildServer } from './buildServer.js';
 import { getServerConfig } from './config.js';
 import { createDependencies } from './dependencies.js';
-import { buildServer } from './buildServer.js';
 
 async function main() {
   const config = getServerConfig();

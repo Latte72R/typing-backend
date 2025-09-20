@@ -1,8 +1,8 @@
-import type { FastifyPluginAsync } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
-
 import { buildLeaderboard, extractPersonalRank } from '../../domain/leaderboard.js';
-import { NotFoundError, ValidationError, ConflictError } from '../../services/typingStore.js';
+import { ConflictError, NotFoundError, ValidationError } from '../../services/typingStore.js';
+import type { FastifyZodPlugin } from '../fastifyTypes.js';
 
 const startSessionResponseSchema = z.object({
   sessionId: z.string().uuid(),
@@ -62,7 +62,17 @@ const finishSessionResponseSchema = z.object({
   attemptsUsed: z.number().int().nonnegative()
 });
 
-function handleStoreError(error: unknown) {
+const messageResponseSchema = z.object({ message: z.string() });
+const contestSessionParamsSchema = z.object({ contestId: z.string().uuid() });
+const sessionIdParamSchema = z.object({ sessionId: z.string().uuid() });
+
+type StartSessionParams = z.infer<typeof contestSessionParamsSchema>;
+type FinishSessionParams = z.infer<typeof sessionIdParamSchema>;
+type FinishSessionBody = z.infer<typeof finishSessionBodySchema>;
+
+type HandledStoreError = { status: 400 | 404 | 409; message: string };
+
+function handleStoreError(error: unknown): HandledStoreError | null {
   if (error instanceof NotFoundError) {
     return { status: 404, message: error.message };
   }
@@ -75,17 +85,22 @@ function handleStoreError(error: unknown) {
   return null;
 }
 
-export const registerSessionRoutes: FastifyPluginAsync = async (fastify) => {
-  fastify.post('/contests/:contestId/sessions', {
+export const registerSessionRoutes: FastifyZodPlugin = async (fastify) => {
+  const app = fastify.withTypeProvider<ZodTypeProvider>();
+
+  app.post('/contests/:contestId/sessions', {
     preHandler: fastify.authenticate,
     schema: {
-      params: z.object({ contestId: z.string().uuid() }),
+      params: contestSessionParamsSchema,
       response: {
-        201: startSessionResponseSchema
+        201: startSessionResponseSchema,
+        400: messageResponseSchema,
+        404: messageResponseSchema,
+        409: messageResponseSchema
       }
     }
   }, async (request, reply) => {
-    const { contestId } = request.params;
+    const { contestId } = request.params as StartSessionParams;
     try {
       const result = await fastify.deps.store.startSession({
         contestId,
@@ -101,17 +116,20 @@ export const registerSessionRoutes: FastifyPluginAsync = async (fastify) => {
     }
   });
 
-  fastify.post('/sessions/:sessionId/finish', {
+  app.post('/sessions/:sessionId/finish', {
     preHandler: fastify.authenticate,
     schema: {
-      params: z.object({ sessionId: z.string().uuid() }),
+      params: sessionIdParamSchema,
       body: finishSessionBodySchema,
       response: {
-        200: finishSessionResponseSchema
+        200: finishSessionResponseSchema,
+        400: messageResponseSchema,
+        404: messageResponseSchema,
+        409: messageResponseSchema
       }
     }
   }, async (request, reply) => {
-    const { sessionId } = request.params;
+    const { sessionId } = request.params as FinishSessionParams;
     const { prisma, store } = fastify.deps;
     let contestId: string | null = null;
     try {
@@ -126,7 +144,7 @@ export const registerSessionRoutes: FastifyPluginAsync = async (fastify) => {
       const result = await store.finishSession({
         sessionId,
         userId: request.user.userId,
-        payload: request.body
+        payload: request.body as FinishSessionBody
       });
       if (contestId) {
         const sessions = await store.getLeaderboard(contestId, 100);

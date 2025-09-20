@@ -1,0 +1,19 @@
+{
+  "name": "typing-backend",
+  "version": "0.1.0",
+  "description": "Core domain logic for the typing backend service.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node --test",
+    "lint": "node ./scripts/lint.js"
+  },
+  "keywords": [
+    "typing",
+    "backend",
+    "contest",
+    "leaderboard"
+  ],
+  "author": "",
+  "license": "MIT"
+}

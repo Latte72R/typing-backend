@@ -1,8 +1,7 @@
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import fastifyJwt from '@fastify/jwt';
-import Fastify from 'fastify';
-import type { FastifyError } from 'fastify';
+import Fastify, { type FastifyError, type FastifyReply, type FastifyRequest } from 'fastify';
 import { serializerCompiler, validatorCompiler, type ZodTypeProvider } from 'fastify-type-provider-zod';
 import { Server as SocketIOServer } from 'socket.io';
 
@@ -14,11 +13,39 @@ import { registerContestRoutes } from './routes/contests.js';
 import { registerPromptRoutes } from './routes/prompts.js';
 import { registerSessionRoutes } from './routes/sessions.js';
 
+type JwtUser = {
+  userId: string;
+  role: 'user' | 'admin';
+};
+
+type FastifyInstanceWithAuth = FastifyZodInstance & {
+  authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply | undefined>;
+};
+
+function isJwtUser(user: FastifyRequest['user']): user is JwtUser {
+  if (!user || typeof user !== 'object') {
+    return false;
+  }
+  if (Buffer.isBuffer(user)) {
+    return false;
+  }
+  const candidate = user as Partial<JwtUser>;
+  if (typeof candidate.userId !== 'string' || candidate.userId.length === 0) {
+    return false;
+  }
+  return candidate.role === 'admin' || candidate.role === 'user';
+}
+
 const authenticate: FastifyZodPlugin = async (fastify) => {
-  fastify.decorate('authenticate', async (request, reply) => {
+  fastify.decorate('authenticate', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       await request.jwtVerify();
     } catch {
+      await reply.code(401).send({ message: '認証に失敗しました。' });
+      return reply;
+    }
+    const user = request.user;
+    if (!isJwtUser(user)) {
       await reply.code(401).send({ message: '認証に失敗しました。' });
       return reply;
     }
@@ -27,14 +54,18 @@ const authenticate: FastifyZodPlugin = async (fastify) => {
 };
 
 const authorizeAdmin: FastifyZodPlugin = async (fastify) => {
-  fastify.decorate('authorizeAdmin', async (request, reply) => {
-    try {
-      await request.jwtVerify();
-    } catch {
+  fastify.decorate('authorizeAdmin', async (request: FastifyRequest, reply: FastifyReply) => {
+    const instance = fastify as FastifyInstanceWithAuth;
+    const authenticationResult = await instance.authenticate(request, reply);
+    if (authenticationResult) {
+      return authenticationResult;
+    }
+    const user = request.user;
+    if (!isJwtUser(user)) {
       await reply.code(401).send({ message: '認証に失敗しました。' });
       return reply;
     }
-    if (request.user.role !== 'admin') {
+    if (user.role !== 'admin') {
       await reply.code(403).send({ message: '管理者権限が必要です。' });
       return reply;
     }

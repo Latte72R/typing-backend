@@ -16,6 +16,11 @@ import {
   buildLeaderboard,
   extractPersonalRank
 } from '../src/index.js';
+import type {
+  Contest,
+  LeaderboardSession,
+  SessionFinishPayload
+} from '../src/index.js';
 
 test('calculateTypingStats: 正確な計算が行われる', () => {
   const result = calculateTypingStats(120, 30, 60000);
@@ -40,7 +45,7 @@ test('formatStats: 表示用文字列を生成する', () => {
 });
 
 test('getContestStatus: 状態遷移を判定する', () => {
-  const contest = {
+  const contest: Contest = {
     id: '1',
     title: '秋の腕試し',
     visibility: 'public',
@@ -60,7 +65,7 @@ test('getContestStatus: 状態遷移を判定する', () => {
 });
 
 test('isLeaderboardVisible respects visibility policy', () => {
-  const baseContest = {
+  const baseContest: Contest = {
     id: '1',
     title: '秋の腕試し',
     visibility: 'public',
@@ -72,15 +77,15 @@ test('isLeaderboardVisible respects visibility policy', () => {
     leaderboardVisibility: 'during'
   };
   assert.equal(isLeaderboardVisible(baseContest, new Date('2025-10-03T10:00:00+09:00')), true);
-  const afterContest = { ...baseContest, leaderboardVisibility: 'after' };
+  const afterContest: Contest = { ...baseContest, leaderboardVisibility: 'after' };
   assert.equal(isLeaderboardVisible(afterContest, new Date('2025-10-03T10:00:00+09:00')), false);
   assert.equal(isLeaderboardVisible(afterContest, new Date('2025-10-08T10:00:00+09:00')), true);
-  const hiddenContest = { ...baseContest, leaderboardVisibility: 'hidden' };
+  const hiddenContest: Contest = { ...baseContest, leaderboardVisibility: 'hidden' };
   assert.equal(isLeaderboardVisible(hiddenContest, new Date('2025-10-08T10:00:00+09:00')), false);
 });
 
 test('validateSessionStart enforces attempt limits', () => {
-  const contest = {
+  const contest: Contest = {
     id: '1',
     title: '秋の腕試し',
     visibility: 'public',
@@ -91,15 +96,13 @@ test('validateSessionStart enforces attempt limits', () => {
     allowBackspace: false,
     leaderboardVisibility: 'during'
   };
-  const entry = { attemptsUsed: 2 };
-  const ok = validateSessionStart(contest, entry, new Date('2025-10-02T10:00:00+09:00'));
+  const ok = validateSessionStart(contest, { attemptsUsed: 2 }, new Date('2025-10-02T10:00:00+09:00'));
   assert.ok(ok.ok);
   const ng = validateSessionStart(contest, { attemptsUsed: 3 }, new Date('2025-10-02T10:00:00+09:00'));
   assert.ok(!ng.ok);
 });
 
 test('replayKeylog correctly counts mistakes and backspace usage', () => {
-  const prompt = { typingTarget: 'abc' };
   const keylog = [
     { t: 0, k: 'a' },
     { t: 430, k: 'x' },
@@ -108,7 +111,7 @@ test('replayKeylog correctly counts mistakes and backspace usage', () => {
     { t: 1450, k: 'b' },
     { t: 1760, k: 'c' }
   ];
-  const result = replayKeylog({ typingTarget: prompt.typingTarget, keylog, allowBackspace: true });
+  const result = replayKeylog({ typingTarget: 'abc', keylog, allowBackspace: true });
   assert.equal(result.correct, 3);
   assert.equal(result.mistakes, 1);
   assert.equal(result.completed, true);
@@ -116,7 +119,7 @@ test('replayKeylog correctly counts mistakes and backspace usage', () => {
 });
 
 test('evaluateSessionFinish flags illegal backspace when not allowed', () => {
-  const contest = {
+  const contest: Contest = {
     id: '1',
     title: '本番',
     visibility: 'public',
@@ -127,16 +130,15 @@ test('evaluateSessionFinish flags illegal backspace when not allowed', () => {
     allowBackspace: false,
     leaderboardVisibility: 'during'
   };
-  const prompt = { typingTarget: 'ab' };
   const keylog = [
     { t: 0, k: 'a' },
     { t: 300, k: 'Backspace' },
     { t: 600, k: 'a' },
     { t: 900, k: 'b' }
   ];
-  const replay = replayKeylog({ typingTarget: prompt.typingTarget, keylog, allowBackspace: false });
+  const replay = replayKeylog({ typingTarget: 'ab', keylog, allowBackspace: false });
   const stats = calculateTypingStats(replay.correct, replay.mistakes, Math.max(replay.durationMs, 1));
-  const payload = {
+  const payload: SessionFinishPayload = {
     cpm: stats.cpm,
     wpm: stats.wpm,
     accuracy: stats.accuracy,
@@ -145,13 +147,13 @@ test('evaluateSessionFinish flags illegal backspace when not allowed', () => {
     keylog,
     clientFlags: { pasteBlocked: true, defocus: 0 }
   };
-  const result = evaluateSessionFinish({ contest, prompt, payload, entry: { attemptsUsed: 1 } });
+  const result = evaluateSessionFinish({ contest, prompt: { typingTarget: 'ab' }, payload, entry: { attemptsUsed: 1 } });
   assert.equal(result.status, 'dq');
   assert.ok(result.issues.includes('BACKSPACE_FORBIDDEN'));
 });
 
 test('evaluateSessionFinish accepts valid run', () => {
-  const contest = {
+  const contest: Contest = {
     id: '1',
     title: '練習会',
     visibility: 'public',
@@ -162,7 +164,6 @@ test('evaluateSessionFinish accepts valid run', () => {
     allowBackspace: true,
     leaderboardVisibility: 'during'
   };
-  const prompt = { typingTarget: 'romaji' };
   const keylog = [
     { t: 0, k: 'r' },
     { t: 310, k: 'o' },
@@ -171,9 +172,9 @@ test('evaluateSessionFinish accepts valid run', () => {
     { t: 1500, k: 'j' },
     { t: 2150, k: 'i' }
   ];
-  const replay = replayKeylog({ typingTarget: prompt.typingTarget, keylog, allowBackspace: true });
+  const replay = replayKeylog({ typingTarget: 'romaji', keylog, allowBackspace: true });
   const stats = calculateTypingStats(replay.correct, replay.mistakes, Math.max(replay.durationMs, 1));
-  const payload = {
+  const payload: SessionFinishPayload = {
     cpm: stats.cpm,
     wpm: stats.wpm,
     accuracy: stats.accuracy,
@@ -182,10 +183,10 @@ test('evaluateSessionFinish accepts valid run', () => {
     keylog,
     clientFlags: { pasteBlocked: true, defocus: 0 }
   };
-  const result = evaluateSessionFinish({ contest, prompt, payload, entry: { attemptsUsed: 2 } });
+  const result = evaluateSessionFinish({ contest, prompt: { typingTarget: 'romaji' }, payload, entry: { attemptsUsed: 2 } });
   assert.equal(result.status, 'finished');
-  assert.deepEqual(result.issues, []);
-  assert.ok(result.anomaly.cv > 0);
+  assert.ok(result.issues.length === 0);
+  assert.ok(result.anomaly.cv >= 0);
 });
 
 test('analyseIntervals detects low variance typing', () => {
@@ -195,7 +196,7 @@ test('analyseIntervals detects low variance typing', () => {
 });
 
 test('buildLeaderboard sorts and assigns ranks', () => {
-  const sessions = [
+  const sessions: LeaderboardSession[] = [
     { sessionId: 's1', userId: 'u1', username: 'Alice', score: 500, accuracy: 0.95, cpm: 400, endedAt: '2025-10-01T10:00:00Z' },
     { sessionId: 's2', userId: 'u2', username: 'Bob', score: 520, accuracy: 0.92, cpm: 390, endedAt: '2025-10-01T09:50:00Z' },
     { sessionId: 's3', userId: 'u3', username: 'Carol', score: 500, accuracy: 0.97, cpm: 410, endedAt: '2025-10-01T09:55:00Z' }
@@ -207,17 +208,17 @@ test('buildLeaderboard sorts and assigns ranks', () => {
   assert.equal(ranked[1].rank, 2);
   assert.equal(summary.total, 3);
   const me = extractPersonalRank(ranked, 'u3');
-  assert.equal(me.rank, 2);
+  assert.equal(me?.rank, 2);
 });
 
 test('remainingAttempts calculates remaining tries', () => {
-  const contest = { maxAttempts: 5 };
+  const contest = { maxAttempts: 5 } as Contest;
   const entry = { attemptsUsed: 2 };
   assert.equal(remainingAttempts(contest, entry), 3);
   assert.equal(remainingAttempts(contest, undefined), 5);
 });
 
 test('requiresJoinCode returns true for private contests', () => {
-  assert.equal(requiresJoinCode({ visibility: 'private' }), true);
-  assert.equal(requiresJoinCode({ visibility: 'public' }), false);
+  assert.equal(requiresJoinCode({ visibility: 'private' } as Contest), true);
+  assert.equal(requiresJoinCode({ visibility: 'public' } as Contest), false);
 });

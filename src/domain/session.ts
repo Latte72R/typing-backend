@@ -1,33 +1,79 @@
-import { calculateTypingStats, compareReportedStats } from './scoring.js';
+import { calculateTypingStats, compareReportedStats, type TypingStats } from './scoring.js';
+import type { Contest, ContestEntry } from './contest.js';
 
 const BACKSPACE_KEYS = new Set(['Backspace', 'BACKSPACE', 'BackspaceKey', 'KeyBackspace']);
 const MAX_KEYSTROKES = 2000;
 
-/**
- * @typedef {Object} KeylogEntry
- * @property {number} t セッション開始からの相対ミリ秒
- * @property {string} k 押下キー
- */
+export interface KeylogEntry {
+  t: number;
+  k: string;
+  ok?: boolean;
+}
 
-/**
- * キーログから正タイプ数・ミス数・完了状況を復元する。
- *
- * @param {{typingTarget:string,keylog:KeylogEntry[],allowBackspace:boolean}} params
- * @returns {{correct:number,mistakes:number,completed:boolean,durationMs:number,issues:string[],forbiddenBackspaceCount:number,processed:number}}
- */
-export function replayKeylog({ typingTarget, keylog, allowBackspace }) {
+export interface ReplayResult {
+  correct: number;
+  mistakes: number;
+  completed: boolean;
+  durationMs: number;
+  issues: string[];
+  forbiddenBackspaceCount: number;
+  processed: number;
+}
+
+export interface IntervalAnalysis {
+  mean: number;
+  stdev: number;
+  cv: number;
+  count: number;
+}
+
+export interface SessionFinishPayload {
+  cpm: number;
+  wpm: number;
+  accuracy: number;
+  score: number;
+  errors?: number;
+  keylog?: KeylogEntry[];
+  clientFlags?: {
+    defocus?: number;
+    pasteBlocked?: boolean;
+    anomalyScore?: number;
+  };
+}
+
+export interface SessionFinishParams {
+  contest: Contest;
+  prompt: { typingTarget: string };
+  payload: SessionFinishPayload;
+  entry: ContestEntry | undefined;
+  now?: Date;
+}
+
+export interface SessionFinishResult {
+  status: 'finished' | 'expired' | 'dq';
+  stats: TypingStats;
+  issues: string[];
+  anomaly: IntervalAnalysis;
+  flags: {
+    pasteBlocked: boolean;
+    defocus: number;
+    anomalyScore?: number;
+  };
+}
+
+export function replayKeylog({ typingTarget, keylog, allowBackspace }: { typingTarget: string; keylog: KeylogEntry[]; allowBackspace: boolean; }): ReplayResult {
   if (typeof typingTarget !== 'string') {
     throw new Error('typingTarget は文字列である必要があります。');
   }
   if (!Array.isArray(keylog)) {
     throw new Error('keylog は配列である必要があります。');
   }
-  let pointer = 0; // 正しく確定した文字数
+  let pointer = 0;
   let mistakes = 0;
   let forbiddenBackspaceCount = 0;
   let lastTime = 0;
-  let firstTime = null;
-  const issues = [];
+  let firstTime: number | null = null;
+  const issues: string[] = [];
   const targetLength = typingTarget.length;
   const processed = keylog.length;
   if (processed > MAX_KEYSTROKES) {
@@ -76,16 +122,12 @@ export function replayKeylog({ typingTarget, keylog, allowBackspace }) {
   return { correct, mistakes, completed, durationMs, issues, forbiddenBackspaceCount, processed };
 }
 
-/**
- * キー間隔の統計値を計算する。
- * @param {KeylogEntry[]} keylog
- * @returns {{mean:number,stdev:number,cv:number,count:number}}
- */
-export function analyseIntervals(keylog) {
+export function analyseIntervals(keylog: KeylogEntry[]): IntervalAnalysis {
   if (!Array.isArray(keylog) || keylog.length < 2) {
-    return { mean: 0, stdev: 0, cv: 0, count: Math.max(0, keylog ? keylog.length - 1 : 0) };
+    const count = Math.max(0, keylog ? keylog.length - 1 : 0);
+    return { mean: 0, stdev: 0, cv: 0, count };
   }
-  const intervals = [];
+  const intervals: number[] = [];
   let last = keylog[0].t;
   for (let i = 1; i < keylog.length; i += 1) {
     const current = keylog[i].t;
@@ -108,28 +150,19 @@ export function analyseIntervals(keylog) {
   return { mean, stdev, cv, count: intervals.length };
 }
 
-/**
- * セッション完了リクエストを検証・再計算する。
- *
- * @param {Object} params
- * @param {Object} params.contest
- * @param {Object} params.prompt
- * @param {Object} params.payload クライアント申告値
- * @param {{attemptsUsed:number}} params.entry
- * @param {Date} [params.now]
- * @returns {{status:'finished'|'expired'|'dq', stats:ReturnType<typeof calculateTypingStats>, issues:string[], anomaly:{mean:number,stdev:number,cv:number,count:number},flags:Object}}
- */
-export function evaluateSessionFinish({ contest, prompt, payload, entry, now = new Date() }) {
+export function evaluateSessionFinish({ contest, prompt, payload, entry, now = new Date() }: SessionFinishParams): SessionFinishResult {
   if (!contest || !prompt || !payload) {
     throw new Error('contest, prompt, payload は必須です。');
   }
-  const additionalIssues = [];
+  void now;
+  const additionalIssues: string[] = [];
   if (!entry || typeof entry.attemptsUsed !== 'number') {
     additionalIssues.push('ENTRY_NOT_FOUND');
   }
   const flags = {
     pasteBlocked: payload?.clientFlags?.pasteBlocked ?? false,
-    defocus: payload?.clientFlags?.defocus ?? 0
+    defocus: payload?.clientFlags?.defocus ?? 0,
+    anomalyScore: payload?.clientFlags?.anomalyScore
   };
   const { correct, mistakes, completed, durationMs, issues, forbiddenBackspaceCount } = replayKeylog({
     typingTarget: prompt.typingTarget,
@@ -150,7 +183,7 @@ export function evaluateSessionFinish({ contest, prompt, payload, entry, now = n
     score: 2
   });
   additionalIssues.push(...issues);
-  if (payload.errors !== undefined && Math.abs(payload.errors - mistakes) > 1) {
+  if (typeof payload.errors === 'number' && Math.abs(payload.errors - mistakes) > 1) {
     additionalIssues.push('ERROR_COUNT_MISMATCH');
   }
   if (!comparison.ok) {
@@ -164,7 +197,7 @@ export function evaluateSessionFinish({ contest, prompt, payload, entry, now = n
   }
 
   const timeLimitMs = contest.timeLimitSec * 1000;
-  if (durationMs > timeLimitMs + 1000) { // 許容1秒の通信誤差
+  if (durationMs > timeLimitMs + 1000) {
     additionalIssues.push('TIME_LIMIT_EXCEEDED');
   }
 
@@ -173,7 +206,7 @@ export function evaluateSessionFinish({ contest, prompt, payload, entry, now = n
     additionalIssues.push('LOW_VARIANCE_TYPING');
   }
 
-  let status = 'finished';
+  let status: SessionFinishResult['status'] = 'finished';
   if (!completed) {
     status = 'expired';
   }

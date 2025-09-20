@@ -1,5 +1,5 @@
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { z } from 'zod';
+import { z } from 'zod/v4';
 import { buildLeaderboard, extractPersonalRank } from '../../domain/leaderboard.js';
 import { ConflictError, NotFoundError, ValidationError } from '../../services/typingStore.js';
 import type { FastifyZodPlugin } from '../fastifyTypes.js';

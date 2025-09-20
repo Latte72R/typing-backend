@@ -6,7 +6,7 @@ import {
   SessionStatus as PrismaSessionStatus
 } from '@prisma/client';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { z } from 'zod';
+import { z } from 'zod/v4';
 
 import { type ContestStatus, getContestStatus, isLeaderboardVisible, requiresJoinCode } from '../../domain/contest.js';
 import { buildLeaderboard, extractPersonalRank } from '../../domain/leaderboard.js';

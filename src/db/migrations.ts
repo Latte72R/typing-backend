@@ -1,4 +1,33 @@
+import bcrypt from 'bcryptjs';
+import { z } from 'zod/v4';
+
 import type { DatabaseClient, DatabasePool } from './client.js';
+
+const DEFAULT_ADMIN_USERNAME = 'admin';
+const DEFAULT_ADMIN_EMAIL = 'admin@example.com';
+const DEFAULT_ADMIN_PASSWORD = 'change-me';
+const BCRYPT_ROUNDS = 12;
+
+const adminSeedSchema = z.object({
+  ADMIN_USERNAME: z.string().min(1).optional(),
+  ADMIN_EMAIL: z.string().email().optional(),
+  ADMIN_PASSWORD: z.string().min(8).optional()
+});
+
+interface AdminSeedConfig {
+  username: string;
+  email: string;
+  password: string;
+}
+
+function resolveAdminSeedConfig(): AdminSeedConfig {
+  const parsed = adminSeedSchema.parse(process.env);
+  return {
+    username: parsed.ADMIN_USERNAME ?? DEFAULT_ADMIN_USERNAME,
+    email: parsed.ADMIN_EMAIL ?? DEFAULT_ADMIN_EMAIL,
+    password: parsed.ADMIN_PASSWORD ?? DEFAULT_ADMIN_PASSWORD
+  } satisfies AdminSeedConfig;
+}
 
 const schemaStatements = [
   `CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`,
@@ -89,11 +118,44 @@ async function runStatements(client: DatabaseClient): Promise<void> {
   }
 }
 
+async function ensureAdminUser(client: DatabaseClient): Promise<void> {
+  const existingAdmin = await client.query<{ id: string }>(
+    `SELECT id FROM users WHERE role = 'admin' LIMIT 1`
+  );
+  if (existingAdmin.rowCount > 0) {
+    return;
+  }
+
+  const { username, email, password } = resolveAdminSeedConfig();
+  const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+
+  const existingUser = await client.query<{ id: string; role: string }>(
+    `SELECT id, role FROM users WHERE username = $1 OR email = $2 LIMIT 1`,
+    [username, email]
+  );
+
+  if (existingUser.rowCount > 0) {
+    const user = existingUser.rows[0];
+    await client.query(
+      `UPDATE users SET role = 'admin', password_hash = $2 WHERE id = $1`,
+      [user.id, passwordHash]
+    );
+    return;
+  }
+
+  await client.query(
+    `INSERT INTO users (id, username, email, password_hash, role)
+     VALUES (uuid_generate_v4(), $1, $2, $3, 'admin')`,
+    [username, email, passwordHash]
+  );
+}
+
 export async function applyMigrations(pool: DatabasePool): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     await runStatements(client);
+    await ensureAdminUser(client);
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');

@@ -20,7 +20,12 @@ e-typing 風タイピングゲームのバックエンドです。ドメイン�
    PORT=3000
    HOST=0.0.0.0
    CORS_ORIGIN=http://localhost:5173
+   ADMIN_USERNAME=admin           # 省略時は "admin"
+   ADMIN_EMAIL=admin@example.com  # 省略時は "admin@example.com"
+   ADMIN_PASSWORD=change-me       # 省略時は "change-me"
    ```
+   - マイグレーション適用時に管理者ユーザーが存在しない場合、自動で `ADMIN_*` の値を使って1件作成します。
+   - パスワードは初期化直後に必ず変更してください。
 3. Prisma でスキーマを適用
    ```bash
    npx prisma migrate dev --name init  # 開発で初期マイグレーションを作成・適用

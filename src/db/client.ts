@@ -1,5 +1,5 @@
 import { Pool, type PoolClient, type PoolConfig } from 'pg';
-import { z } from 'zod';
+import { z } from 'zod/v4';
 
 const envConfigSchema = z.object({
   DATABASE_URL: z.string().url().optional(),

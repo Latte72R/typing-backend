@@ -7,34 +7,16 @@ import { Server as SocketIOServer } from 'socket.io';
 
 import type { ServerConfig } from './config.js';
 import type { ServerDependencies } from './dependencies.js';
+import { isJwtUser, type JwtUser } from './auth/jwtUser.js';
 import type { FastifyZodInstance, FastifyZodPlugin } from './fastifyTypes.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerContestRoutes } from './routes/contests.js';
 import { registerPromptRoutes } from './routes/prompts.js';
 import { registerSessionRoutes } from './routes/sessions.js';
 
-type JwtUser = {
-  userId: string;
-  role: 'user' | 'admin';
-};
-
 type FastifyInstanceWithAuth = FastifyZodInstance & {
   authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply | undefined>;
 };
-
-function isJwtUser(user: FastifyRequest['user']): user is JwtUser {
-  if (!user || typeof user !== 'object') {
-    return false;
-  }
-  if (Buffer.isBuffer(user)) {
-    return false;
-  }
-  const candidate = user as Partial<JwtUser>;
-  if (typeof candidate.userId !== 'string' || candidate.userId.length === 0) {
-    return false;
-  }
-  return candidate.role === 'admin' || candidate.role === 'user';
-}
 
 const authenticate: FastifyZodPlugin = async (fastify) => {
   fastify.decorate('authenticate', async (request: FastifyRequest, reply: FastifyReply) => {

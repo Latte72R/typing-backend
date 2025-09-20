@@ -10,6 +10,7 @@ import { z } from 'zod/v4';
 
 import { type ContestStatus, getContestStatus, isLeaderboardVisible, requiresJoinCode } from '../../domain/contest.js';
 import { buildLeaderboard, extractPersonalRank } from '../../domain/leaderboard.js';
+import { ensureJwtUser } from '../auth/jwtUser.js';
 import type { FastifyZodPlugin } from '../fastifyTypes.js';
 
 type ContestVisibility = 'public' | 'private';
@@ -161,6 +162,10 @@ export const registerContestRoutes: FastifyZodPlugin = async (fastify) => {
       return reply.code(400).send({ message: '開始日時は終了日時より前である必要があります。' });
     }
     const { prisma } = fastify.deps;
+    const currentUser = ensureJwtUser(request, reply, 'ユーザー情報の取得に失敗しました。');
+    if (!currentUser) {
+      return reply;
+    }
     const contest = await prisma.contest.create({
       data: {
         title: body.title,
@@ -175,7 +180,7 @@ export const registerContestRoutes: FastifyZodPlugin = async (fastify) => {
         allowBackspace: body.allowBackspace,
         leaderboardVisibility: toPrismaLeaderboardVisibility(body.leaderboardVisibility),
         language: toPrismaLanguage(body.language),
-        createdBy: request.user.userId
+        createdBy: currentUser.userId
       }
     });
     const status = getContestStatus({
@@ -301,16 +306,20 @@ export const registerContestRoutes: FastifyZodPlugin = async (fastify) => {
         return reply.code(403).send({ message: 'このコンテストには正しい参加コードが必要です。' });
       }
     }
+    const currentUser = ensureJwtUser(request, reply, 'ユーザー情報の取得に失敗しました。');
+    if (!currentUser) {
+      return reply;
+    }
     await prisma.entry.upsert({
       where: {
         userId_contestId: {
-          userId: request.user.userId,
+          userId: currentUser.userId,
           contestId
         }
       },
       update: {},
       create: {
-        userId: request.user.userId,
+        userId: currentUser.userId,
         contestId
       }
     });
@@ -360,9 +369,13 @@ export const registerContestRoutes: FastifyZodPlugin = async (fastify) => {
     if (!isLeaderboardVisible(domainContest)) {
       return reply.code(403).send({ message: 'このコンテストのリーダーボードは現在閲覧できません。' });
     }
+    const currentUser = ensureJwtUser(request, reply, 'ユーザー情報の取得に失敗しました。');
+    if (!currentUser) {
+      return reply;
+    }
     const sessions = await store.getLeaderboard(contestId, 100);
     const leaderboard = buildLeaderboard(sessions);
-    const me = extractPersonalRank(leaderboard.ranked, request.user.userId);
+    const me = extractPersonalRank(leaderboard.ranked, currentUser.userId);
     return {
       top: leaderboard.summary.top,
       total: leaderboard.summary.total,

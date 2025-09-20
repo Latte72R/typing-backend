@@ -1,6 +1,7 @@
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod/v4';
 import { buildLeaderboard, extractPersonalRank } from '../../domain/leaderboard.js';
+import { ensureJwtUser } from '../auth/jwtUser.js';
 import { ConflictError, NotFoundError, ValidationError } from '../../services/typingStore.js';
 import type { FastifyZodPlugin } from '../fastifyTypes.js';
 
@@ -102,9 +103,13 @@ export const registerSessionRoutes: FastifyZodPlugin = async (fastify) => {
   }, async (request, reply) => {
     const { contestId } = request.params as StartSessionParams;
     try {
+      const currentUser = ensureJwtUser(request, reply, 'ユーザー情報の取得に失敗しました。');
+      if (!currentUser) {
+        return reply;
+      }
       const result = await fastify.deps.store.startSession({
         contestId,
-        userId: request.user.userId
+        userId: currentUser.userId
       });
       return reply.code(201).send(result);
     } catch (error) {
@@ -131,6 +136,10 @@ export const registerSessionRoutes: FastifyZodPlugin = async (fastify) => {
   }, async (request, reply) => {
     const { sessionId } = request.params as FinishSessionParams;
     const { prisma, store } = fastify.deps;
+    const currentUser = ensureJwtUser(request, reply, 'ユーザー情報の取得に失敗しました。');
+    if (!currentUser) {
+      return reply;
+    }
     let contestId: string | null = null;
     try {
       const session = await prisma.session.findUnique({
@@ -143,13 +152,13 @@ export const registerSessionRoutes: FastifyZodPlugin = async (fastify) => {
       contestId = session.contestId;
       const result = await store.finishSession({
         sessionId,
-        userId: request.user.userId,
+        userId: currentUser.userId,
         payload: request.body as FinishSessionBody
       });
       if (contestId) {
         const sessions = await store.getLeaderboard(contestId, 100);
         const leaderboard = buildLeaderboard(sessions);
-        const me = extractPersonalRank(leaderboard.ranked, request.user.userId);
+        const me = extractPersonalRank(leaderboard.ranked, currentUser.userId);
         fastify.io.to(`contest:${contestId}:leaderboard`).emit('leaderboard:update', {
           top: leaderboard.summary.top,
           total: leaderboard.summary.total,

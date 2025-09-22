@@ -15,7 +15,6 @@ import {
   formatStats,
   getContestStatus,
   isLeaderboardVisible,
-  remainingAttempts,
   replayKeylog,
   requiresJoinCode,
   validateSessionStart
@@ -51,7 +50,6 @@ test('getContestStatus: 状態遷移を判定する', () => {
     startsAt: '2025-10-01T09:00:00+09:00',
     endsAt: '2025-10-07T23:59:59+09:00',
     timeLimitSec: 60,
-    maxAttempts: 3,
     allowBackspace: false,
     leaderboardVisibility: 'during'
   };
@@ -71,7 +69,6 @@ test('isLeaderboardVisible respects visibility policy', () => {
     startsAt: '2025-10-01T09:00:00+09:00',
     endsAt: '2025-10-07T23:59:59+09:00',
     timeLimitSec: 60,
-    maxAttempts: 3,
     allowBackspace: false,
     leaderboardVisibility: 'during'
   };
@@ -83,7 +80,7 @@ test('isLeaderboardVisible respects visibility policy', () => {
   assert.equal(isLeaderboardVisible(hiddenContest, new Date('2025-10-08T10:00:00+09:00')), false);
 });
 
-test('validateSessionStart enforces attempt limits', () => {
+test('validateSessionStart requires entry and active contest', () => {
   const contest: Contest = {
     id: '1',
     title: '秋の腕試し',
@@ -91,14 +88,17 @@ test('validateSessionStart enforces attempt limits', () => {
     startsAt: '2025-10-01T09:00:00+09:00',
     endsAt: '2025-10-07T23:59:59+09:00',
     timeLimitSec: 60,
-    maxAttempts: 3,
     allowBackspace: false,
     leaderboardVisibility: 'during'
   };
   const ok = validateSessionStart(contest, { attemptsUsed: 2 }, new Date('2025-10-02T10:00:00+09:00'));
   assert.ok(ok.ok);
-  const ng = validateSessionStart(contest, { attemptsUsed: 3 }, new Date('2025-10-02T10:00:00+09:00'));
-  assert.ok(!ng.ok);
+  const noEntry = validateSessionStart(contest, undefined, new Date('2025-10-02T10:00:00+09:00'));
+  assert.ok(!noEntry.ok);
+  const beforeStart = validateSessionStart(contest, { attemptsUsed: 0 }, new Date('2025-09-30T10:00:00+09:00'));
+  assert.ok(!beforeStart.ok);
+  const afterEnd = validateSessionStart(contest, { attemptsUsed: 0 }, new Date('2025-10-08T10:00:00+09:00'));
+  assert.ok(!afterEnd.ok);
 });
 
 test('replayKeylog correctly counts mistakes and backspace usage', () => {
@@ -125,7 +125,6 @@ test('evaluateSessionFinish flags illegal backspace when not allowed', () => {
     startsAt: '2025-10-01T09:00:00+09:00',
     endsAt: '2025-10-07T23:59:59+09:00',
     timeLimitSec: 60,
-    maxAttempts: 3,
     allowBackspace: false,
     leaderboardVisibility: 'during'
   };
@@ -159,7 +158,6 @@ test('evaluateSessionFinish accepts valid run', () => {
     startsAt: '2025-10-01T09:00:00+09:00',
     endsAt: '2025-10-07T23:59:59+09:00',
     timeLimitSec: 60,
-    maxAttempts: 5,
     allowBackspace: true,
     leaderboardVisibility: 'during'
   };
@@ -208,13 +206,6 @@ test('buildLeaderboard sorts and assigns ranks', () => {
   assert.equal(summary.total, 3);
   const me = extractPersonalRank(ranked, 'u3');
   assert.equal(me?.rank, 2);
-});
-
-test('remainingAttempts calculates remaining tries', () => {
-  const contest = { maxAttempts: 5 } as Contest;
-  const entry = { attemptsUsed: 2 };
-  assert.equal(remainingAttempts(contest, entry), 3);
-  assert.equal(remainingAttempts(contest, undefined), 5);
 });
 
 test('requiresJoinCode returns true for private contests', () => {

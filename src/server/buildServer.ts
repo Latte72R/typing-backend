@@ -7,7 +7,7 @@ import { Server as SocketIOServer } from 'socket.io';
 
 import type { ServerConfig } from './config.js';
 import type { ServerDependencies } from './dependencies.js';
-import { isJwtUser, type JwtUser } from './auth/jwtUser.js';
+import { getJwtUser, normalizeJwtUser, type JwtUser } from './auth/jwtUser.js';
 import type { FastifyZodInstance, FastifyZodPlugin } from './fastifyTypes.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerContestRoutes } from './routes/contests.js';
@@ -21,13 +21,29 @@ type FastifyInstanceWithAuth = FastifyZodInstance & {
 const authenticate: FastifyZodPlugin = async (fastify) => {
   fastify.decorate('authenticate', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      await request.jwtVerify();
-    } catch {
-      await reply.code(401).send({ message: '認証に失敗しました。' });
-      return reply;
-    }
-    const user = request.user;
-    if (!isJwtUser(user)) {
+      const payload = await request.jwtVerify();
+      const normalized = normalizeJwtUser(payload);
+      if (!normalized) {
+        request.log.warn({
+          msg: 'authenticate: jwt payload missing required fields',
+          payloadKeys: payload && typeof payload === 'object' && !Buffer.isBuffer(payload)
+            ? Object.keys(payload as Record<string, unknown>)
+            : undefined
+        });
+        await reply.code(401).send({ message: '認証に失敗しました。' });
+        return reply;
+      }
+      request.user = normalized as FastifyRequest['user'];
+      request.log.debug({
+        msg: 'authenticate: user verified',
+        userId: normalized.userId,
+        role: normalized.role
+      });
+    } catch (error) {
+      request.log.warn({
+        msg: 'authenticate: jwtVerify failed',
+        cause: error instanceof Error ? error.message : error
+      });
       await reply.code(401).send({ message: '認証に失敗しました。' });
       return reply;
     }
@@ -42,12 +58,14 @@ const authorizeAdmin: FastifyZodPlugin = async (fastify) => {
     if (authenticationResult) {
       return authenticationResult;
     }
-    const user = request.user;
-    if (!isJwtUser(user)) {
+    const user = getJwtUser(request);
+    if (!user) {
+      request.log.warn({ msg: 'authorizeAdmin: user missing after authenticate' });
       await reply.code(401).send({ message: '認証に失敗しました。' });
       return reply;
     }
     if (user.role !== 'admin') {
+      request.log.warn({ msg: 'authorizeAdmin: role mismatch', role: user.role, userId: user.userId });
       await reply.code(403).send({ message: '管理者権限が必要です。' });
       return reply;
     }
@@ -73,7 +91,10 @@ export async function buildServer({ config, dependencies }: BuildServerOptions):
 
   await fastify.register(cors, {
     origin: config.corsOrigins ?? true,
-    credentials: true
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    preflightContinue: false
   });
   await fastify.register(helmet, {
     contentSecurityPolicy: false

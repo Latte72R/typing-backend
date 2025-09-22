@@ -52,7 +52,7 @@ type Contest = {
   visibility: 'public'|'private';
   joinCode?: string; // private時
   startsAt: string; endsAt: string; timezone: 'Asia/Tokyo';
-  timeLimitSec: number; maxAttempts: number; allowBackspace: boolean;
+  timeLimitSec: number; allowBackspace: boolean;
   leaderboardVisibility: 'during'|'after'|'hidden';
   language: 'romaji'|'english'|'kana';
 };

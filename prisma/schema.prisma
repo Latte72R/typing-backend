@@ -62,7 +62,6 @@ model Contest {
   endsAt                 DateTime               @map("ends_at")
   timezone               String                 @default("Asia/Tokyo")
   timeLimitSec           Int                    @map("time_limit_sec")
-  maxAttempts            Int                    @map("max_attempts")
   allowBackspace         Boolean                @default(false) @map("allow_backspace")
   leaderboardVisibility  LeaderboardVisibility  @map("leaderboard_visibility")
   language               ContestLanguage
@@ -88,6 +87,7 @@ model Prompt {
 
   contests      ContestPrompt[]
   sessions      Session[]
+  sessionPrompts SessionPrompt[]
 
   @@map("prompts")
 }
@@ -144,6 +144,7 @@ model Session {
   contest     Contest     @relation(fields: [contestId], references: [id])
   prompt      Prompt      @relation(fields: [promptId], references: [id])
   keystrokes  Keystroke[]
+  sessionPrompts SessionPrompt[]
 
   @@index([contestId, score], map: "sessions_contest_score_idx")
   @@map("sessions")
@@ -161,6 +162,20 @@ model Keystroke {
 
   @@index([sessionId])
   @@map("keystrokes")
+}
+
+model SessionPrompt {
+  sessionId  String  @map("session_id")
+  promptId   String  @map("prompt_id")
+  orderIndex Int     @map("order_index")
+
+  session Session @relation(fields: [sessionId], references: [id])
+  prompt  Prompt  @relation(fields: [promptId], references: [id])
+
+  @@id([sessionId, orderIndex])
+  @@unique([sessionId, promptId], map: "session_prompts_session_prompt_idx")
+  @@index([sessionId], map: "session_prompts_session_idx")
+  @@map("session_prompts")
 }
 
 model RefreshToken {

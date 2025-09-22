@@ -12,7 +12,7 @@ import {
   type UserRole as PrismaUserRole
 } from '@prisma/client';
 
-import { type Contest, remainingAttempts, validateSessionStart } from '../domain/contest.js';
+import { type Contest, validateSessionStart } from '../domain/contest.js';
 import type { LeaderboardSession } from '../domain/leaderboard.js';
 import type { TypingStats } from '../domain/scoring.js';
 import {
@@ -20,6 +20,8 @@ import {
   type SessionFinishPayload,
   type SessionFinishResult
 } from '../domain/session.js';
+
+const MAX_SESSION_PROMPT_TOTAL = 2000;
 
 export interface UserRecord {
   id: string;
@@ -56,7 +58,18 @@ export interface StartSessionResult {
   prompt: PromptDto;
   startedAt: string;
   attemptsUsed: number;
-  attemptsRemaining: number;
+  orderIndex: number;
+}
+
+export interface AppendSessionPromptOptions {
+  sessionId: string;
+  userId: string;
+  now?: Date;
+}
+
+export interface AppendSessionPromptResult {
+  prompt: PromptDto;
+  orderIndex: number;
 }
 
 export interface FinishSessionOptions {
@@ -116,7 +129,6 @@ function mapContest(row: PrismaContest): Contest {
     startsAt: row.startsAt.toISOString(),
     endsAt: row.endsAt.toISOString(),
     timeLimitSec: row.timeLimitSec,
-    maxAttempts: row.maxAttempts,
     allowBackspace: row.allowBackspace,
     leaderboardVisibility: toLeaderboardVisibility(row.leaderboardVisibility)
   };
@@ -148,6 +160,17 @@ function mapPrompt(row: PrismaPrompt): PromptDto {
 
 function mapContestPrompt(row: ContestPrompt & { prompt: PrismaPrompt }): PromptDto {
   return mapPrompt(row.prompt);
+}
+
+async function fetchContestPromptsOrdered(
+  tx: Prisma.TransactionClient,
+  contestId: string,
+): Promise<Array<ContestPrompt & { prompt: PrismaPrompt }>> {
+  return tx.contestPrompt.findMany({
+    where: { contestId },
+    orderBy: { orderIndex: 'asc' },
+    include: { prompt: true }
+  });
 }
 
 function isBetterScore(existing: EntryRecord, candidate: { score: number; accuracy: number; cpm: number }): boolean {
@@ -295,15 +318,12 @@ export class TypingStore {
       if (!validation.ok) {
         throw new ValidationError(validation.reason);
       }
-      const promptRow = await tx.contestPrompt.findFirst({
-        where: { contestId: options.contestId },
-        orderBy: { orderIndex: 'asc' },
-        include: { prompt: true }
-      });
-      if (!promptRow) {
+      const promptRows = await fetchContestPromptsOrdered(tx, options.contestId);
+      if (promptRows.length === 0) {
         throw new NotFoundError('コンテストに紐づくプロンプトが設定されていません。');
       }
-      const prompt = mapContestPrompt(promptRow);
+      const promptIndex = entry.attemptsUsed % promptRows.length;
+      const prompt = mapContestPrompt(promptRows[promptIndex]!);
       const sessionId = randomUUID();
       const startedAt = now.toISOString();
       await tx.session.create({
@@ -314,6 +334,13 @@ export class TypingStore {
           promptId: prompt.id,
           startedAt: now,
           status: PrismaSessionStatus.RUNNING
+        }
+      });
+      await tx.sessionPrompt.create({
+        data: {
+          sessionId,
+          promptId: prompt.id,
+          orderIndex: 0
         }
       });
       const updatedEntry = await tx.entry.update({
@@ -327,15 +354,74 @@ export class TypingStore {
         select: { attemptsUsed: true }
       });
       const attemptsUsed = updatedEntry.attemptsUsed;
-      const attemptsRemaining = remainingAttempts(contest, { attemptsUsed });
       return {
         sessionId,
         contestId: options.contestId,
         prompt,
         startedAt,
         attemptsUsed,
-        attemptsRemaining
+        orderIndex: 0
       } satisfies StartSessionResult;
+    }, {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead
+    });
+    return result;
+  }
+
+  async appendSessionPrompt(options: AppendSessionPromptOptions): Promise<AppendSessionPromptResult> {
+    const result = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const sessionRow = await tx.session.findUnique({
+        where: { id: options.sessionId },
+        select: {
+          id: true,
+          userId: true,
+          contestId: true,
+          status: true
+        }
+      });
+      if (!sessionRow || sessionRow.userId !== options.userId) {
+        throw new NotFoundError('セッションが見つかりません。');
+      }
+      if (sessionRow.status !== PrismaSessionStatus.RUNNING) {
+        throw new ConflictError('このセッションは終了しています。');
+      }
+      const promptRows = await fetchContestPromptsOrdered(tx, sessionRow.contestId);
+      if (promptRows.length === 0) {
+        throw new NotFoundError('コンテストに紐づくプロンプトが設定されていません。');
+      }
+      const assignments = await tx.sessionPrompt.findMany({
+        where: { sessionId: options.sessionId },
+        orderBy: { orderIndex: 'asc' }
+      });
+      const lastAssignment = assignments.at(-1);
+      const orderIndex = (lastAssignment?.orderIndex ?? -1) + 1;
+      const promptMap = new Map(promptRows.map((row) => [row.promptId, row] as const));
+      const assignedCharCount = assignments.reduce((sum, assignment) => {
+        const prompt = promptMap.get(assignment.promptId)?.prompt;
+        return sum + (prompt?.typingTarget.length ?? 0);
+      }, 0);
+      const lastPromptId = lastAssignment?.promptId ?? promptRows[0]!.promptId;
+      const lastPromptIndex = promptRows.findIndex((row) => row.promptId === lastPromptId);
+      if (lastPromptIndex === -1) {
+        throw new ValidationError('セッションで利用するプロンプトがコンテストの設定と一致しません。');
+      }
+      const nextPromptRow = promptRows[(lastPromptIndex + (lastAssignment ? 1 : 0)) % promptRows.length]!;
+      const nextPrompt = mapContestPrompt(nextPromptRow);
+      const projectedTotal = assignedCharCount + nextPrompt.typingTarget.length;
+      if (projectedTotal > MAX_SESSION_PROMPT_TOTAL) {
+        throw new ValidationError('これ以上のプロンプトを追加するとキー数の上限を超えます。');
+      }
+      await tx.sessionPrompt.create({
+        data: {
+          sessionId: options.sessionId,
+          promptId: nextPrompt.id,
+          orderIndex
+        }
+      });
+      return {
+        prompt: nextPrompt,
+        orderIndex
+      } satisfies AppendSessionPromptResult;
     }, {
       isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead
     });
@@ -375,9 +461,19 @@ export class TypingStore {
       if (!promptRow) {
         throw new NotFoundError('プロンプト情報が見つかりません。');
       }
+      const sessionPromptRows = await tx.sessionPrompt.findMany({
+        where: { sessionId: options.sessionId },
+        orderBy: { orderIndex: 'asc' },
+        include: {
+          prompt: true
+        }
+      });
+      const typingTarget = sessionPromptRows.length > 0
+        ? sessionPromptRows.map((assignment) => assignment.prompt.typingTarget).join('')
+        : promptRow.typingTarget;
       const evaluation = evaluateSessionFinish({
         contest,
-        prompt: { typingTarget: promptRow.typingTarget },
+        prompt: { typingTarget },
         payload: options.payload,
         entry: { attemptsUsed: entry.attemptsUsed },
         now

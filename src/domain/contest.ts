@@ -13,7 +13,6 @@ export interface Contest {
   startsAt: string;
   endsAt: string;
   timeLimitSec: number;
-  maxAttempts: number;
   allowBackspace: boolean;
   leaderboardVisibility: LeaderboardVisibility;
 }
@@ -61,17 +60,9 @@ export function validateSessionStart(contest: Contest, entry: ContestEntry | und
   if (!entry) {
     return { ok: false, reason: 'エントリーが必要です。' };
   }
-  if (entry.attemptsUsed >= contest.maxAttempts) {
-    return { ok: false, reason: '試行回数の上限に達しました。' };
-  }
   return { ok: true };
 }
 
 export function requiresJoinCode(contest: Contest): boolean {
   return contest.visibility === 'private';
-}
-
-export function remainingAttempts(contest: Contest, entry: ContestEntry | undefined): number {
-  if (!entry) return contest.maxAttempts;
-  return Math.max(0, contest.maxAttempts - entry.attemptsUsed);
 }

@@ -37,6 +37,7 @@ type DependencyStubs = {
     finishSessionCalled: boolean;
     startSession: () => Promise<never>;
     finishSession: () => Promise<never>;
+    appendSessionPrompt: () => Promise<never>;
     getLeaderboard: () => Promise<[]>;
     createUser: () => Promise<never>;
     findUserByEmail: () => Promise<null>;
@@ -86,6 +87,9 @@ function createDependencyStubs(): { dependencies: ServerDependencies; stubs: Dep
       async finishSession() {
         stubs.store.finishSessionCalled = true;
         throw new Error('finishSession should not be invoked in authentication guard tests');
+      },
+      async appendSessionPrompt() {
+        throw new Error('appendSessionPrompt should not be invoked in authentication guard tests');
       },
       async getLeaderboard() {
         return [];
@@ -153,7 +157,6 @@ test('POST /api/v1/contests はトークン未付与で 401 を返す', async (t
       endsAt: '2025-10-02T09:00:00+09:00',
       timezone: 'Asia/Tokyo',
       timeLimitSec: 60,
-      maxAttempts: 3,
       allowBackspace: false,
       leaderboardVisibility: 'during',
       language: 'romaji'
@@ -183,7 +186,6 @@ test('POST /api/v1/contests は userId 欠落トークンで 401 を返す', asy
       endsAt: '2025-10-02T09:00:00+09:00',
       timezone: 'Asia/Tokyo',
       timeLimitSec: 60,
-      maxAttempts: 3,
       allowBackspace: false,
       leaderboardVisibility: 'during',
       language: 'romaji'

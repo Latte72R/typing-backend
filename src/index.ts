@@ -20,7 +20,6 @@ export type {
 export {
   getContestStatus,
   isLeaderboardVisible,
-  remainingAttempts, 
   requiresJoinCode,
   validateSessionStart
 } from './domain/contest.js';

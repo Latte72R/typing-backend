@@ -14,7 +14,8 @@
     "test": "node --loader ts-node/esm --test tests/**/*.test.ts",
     "lint": "biome lint .",
     "format": "biome format .",
-    "start": "node dist/server/main.js"
+    "start": "node dist/server/main.js",
+    "seed:prompts": "ts-node --esm scripts/bulkImportPrompts.ts"
   },
   "keywords": [
     "typing",

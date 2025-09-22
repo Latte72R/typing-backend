@@ -15,7 +15,16 @@ const startSessionResponseSchema = z.object({
   }),
   startedAt: z.string(),
   attemptsUsed: z.number().int().nonnegative(),
-  attemptsRemaining: z.number().int().nonnegative()
+  orderIndex: z.number().int().nonnegative()
+});
+
+const nextPromptResponseSchema = z.object({
+  prompt: z.object({
+    id: z.string().uuid(),
+    displayText: z.string(),
+    typingTarget: z.string()
+  }),
+  orderIndex: z.number().int().nonnegative()
 });
 
 const finishSessionBodySchema = z.object({
@@ -64,8 +73,9 @@ const finishSessionResponseSchema = z.object({
 });
 
 const messageResponseSchema = z.object({ message: z.string() });
-const contestSessionParamsSchema = z.object({ contestId: z.string().uuid() });
-const sessionIdParamSchema = z.object({ sessionId: z.string().uuid() });
+const contestSessionParamsSchema = z.object({ contestId: z.string() });
+const sessionIdParamSchema = z.object({ sessionId: z.string() });
+const uuidStringSchema = z.string().uuid();
 
 type StartSessionParams = z.infer<typeof contestSessionParamsSchema>;
 type FinishSessionParams = z.infer<typeof sessionIdParamSchema>;
@@ -90,12 +100,12 @@ export const registerSessionRoutes: FastifyZodPlugin = async (fastify) => {
   const app = fastify.withTypeProvider<ZodTypeProvider>();
 
   app.post('/contests/:contestId/sessions', {
-    preHandler: fastify.authenticate,
     schema: {
       params: contestSessionParamsSchema,
       response: {
         201: startSessionResponseSchema,
         400: messageResponseSchema,
+        401: messageResponseSchema,
         404: messageResponseSchema,
         409: messageResponseSchema
       }
@@ -103,12 +113,16 @@ export const registerSessionRoutes: FastifyZodPlugin = async (fastify) => {
   }, async (request, reply) => {
     const { contestId } = request.params as StartSessionParams;
     try {
-      const currentUser = ensureJwtUser(request, reply, 'ユーザー情報の取得に失敗しました。');
+      const currentUser = await ensureJwtUser(request, reply);
       if (!currentUser) {
         return reply;
       }
+      const parsedContestId = uuidStringSchema.safeParse(contestId);
+      if (!parsedContestId.success) {
+        return reply.code(400).send({ message: 'contestId は UUID 形式で指定してください。' });
+      }
       const result = await fastify.deps.store.startSession({
-        contestId,
+        contestId: parsedContestId.data,
         userId: currentUser.userId
       });
       return reply.code(201).send(result);
@@ -121,14 +135,50 @@ export const registerSessionRoutes: FastifyZodPlugin = async (fastify) => {
     }
   });
 
+  app.post('/sessions/:sessionId/prompts/next', {
+    schema: {
+      params: sessionIdParamSchema,
+      response: {
+        201: nextPromptResponseSchema,
+        400: messageResponseSchema,
+        401: messageResponseSchema,
+        404: messageResponseSchema,
+        409: messageResponseSchema
+      }
+    }
+  }, async (request, reply) => {
+    const { sessionId } = request.params as FinishSessionParams;
+    const currentUser = await ensureJwtUser(request, reply);
+    if (!currentUser) {
+      return reply;
+    }
+    const parsedSessionId = uuidStringSchema.safeParse(sessionId);
+    if (!parsedSessionId.success) {
+      return reply.code(400).send({ message: 'sessionId は UUID 形式で指定してください。' });
+    }
+    try {
+      const nextPrompt = await fastify.deps.store.appendSessionPrompt({
+        sessionId: parsedSessionId.data,
+        userId: currentUser.userId
+      });
+      return reply.code(201).send(nextPrompt);
+    } catch (error) {
+      const handled = handleStoreError(error);
+      if (handled) {
+        return reply.code(handled.status).send({ message: handled.message });
+      }
+      throw error;
+    }
+  });
+
   app.post('/sessions/:sessionId/finish', {
-    preHandler: fastify.authenticate,
     schema: {
       params: sessionIdParamSchema,
       body: finishSessionBodySchema,
       response: {
         200: finishSessionResponseSchema,
         400: messageResponseSchema,
+        401: messageResponseSchema,
         404: messageResponseSchema,
         409: messageResponseSchema
       }
@@ -136,14 +186,18 @@ export const registerSessionRoutes: FastifyZodPlugin = async (fastify) => {
   }, async (request, reply) => {
     const { sessionId } = request.params as FinishSessionParams;
     const { prisma, store } = fastify.deps;
-    const currentUser = ensureJwtUser(request, reply, 'ユーザー情報の取得に失敗しました。');
+    const currentUser = await ensureJwtUser(request, reply);
     if (!currentUser) {
       return reply;
+    }
+    const parsedSessionId = uuidStringSchema.safeParse(sessionId);
+    if (!parsedSessionId.success) {
+      return reply.code(400).send({ message: 'sessionId は UUID 形式で指定してください。' });
     }
     let contestId: string | null = null;
     try {
       const session = await prisma.session.findUnique({
-        where: { id: sessionId },
+        where: { id: parsedSessionId.data },
         select: { contestId: true }
       });
       if (!session) {
@@ -151,7 +205,7 @@ export const registerSessionRoutes: FastifyZodPlugin = async (fastify) => {
       }
       contestId = session.contestId;
       const result = await store.finishSession({
-        sessionId,
+        sessionId: parsedSessionId.data,
         userId: currentUser.userId,
         payload: request.body as FinishSessionBody
       });

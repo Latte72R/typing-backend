@@ -138,14 +138,25 @@ export const registerPromptRoutes: FastifyZodPlugin = async (fastify) => {
     schema: {
       params: promptIdParamSchema,
       response: {
-        204: z.null()
+        204: z.null(),
+        404: messageResponseSchema,
+        409: messageResponseSchema
       }
     }
   }, async (request, reply) => {
     const { prisma } = fastify.deps;
     const { promptId } = request.params as PromptIdParams;
-    await prisma.prompt.delete({ where: { id: promptId } }).catch(() => {
-      // ignore missing rows to keep idempotent
+    const prompt = await prisma.prompt.findUnique({ where: { id: promptId } });
+    if (!prompt) {
+      return reply.code(404).send({ message: 'プロンプトが見つかりません。' });
+    }
+    const sessionCount = await prisma.session.count({ where: { promptId } });
+    if (sessionCount > 0) {
+      return reply.code(409).send({ message: 'このプロンプトは既存のセッションで使用されているため削除できません。' });
+    }
+    await prisma.$transaction(async (tx) => {
+      await tx.contestPrompt.deleteMany({ where: { promptId } });
+      await tx.prompt.delete({ where: { id: promptId } });
     });
     return reply.code(204).send();
   });

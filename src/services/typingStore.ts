@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import {
   type ContestPrompt,
   type Keystroke,
@@ -115,6 +115,14 @@ interface EntryRecord {
 
 function toContestVisibility(value: PrismaContest['visibility']): Contest['visibility'] {
   return value.toLowerCase() as Contest['visibility'];
+}
+
+function pickRandomPrompt<T>(prompts: readonly T[]): T {
+  if (prompts.length === 0) {
+    throw new ValidationError('プロンプトが設定されていません。');
+  }
+  const index = randomInt(prompts.length);
+  return prompts[index] as T;
 }
 
 function toLeaderboardVisibility(value: PrismaContest['leaderboardVisibility']): Contest['leaderboardVisibility'] {
@@ -322,11 +330,7 @@ export class TypingStore {
       if (promptRows.length === 0) {
         throw new NotFoundError('コンテストに紐づくプロンプトが設定されていません。');
       }
-      const promptIndex = entry.attemptsUsed % promptRows.length;
-      const selectedPromptRow = promptRows[promptIndex];
-      if (!selectedPromptRow) {
-        throw new ValidationError('コンテストのプロンプト定義が不正です。');
-      }
+      const selectedPromptRow = pickRandomPrompt(promptRows);
       const prompt = mapContestPrompt(selectedPromptRow);
       const sessionId = randomUUID();
       const startedAt = now.toISOString();
@@ -397,23 +401,23 @@ export class TypingStore {
         where: { sessionId: options.sessionId },
         orderBy: { orderIndex: 'asc' }
       });
-      const lastAssignment = assignments.at(-1);
-      const orderIndex = (lastAssignment?.orderIndex ?? -1) + 1;
+      const orderIndex = assignments.length;
       const promptMap = new Map(promptRows.map((row) => [row.promptId, row] as const));
       const assignedCharCount = assignments.reduce((sum, assignment) => {
         const prompt = promptMap.get(assignment.promptId)?.prompt;
         return sum + (prompt?.typingTarget.length ?? 0);
       }, 0);
-      const firstPromptRow = promptRows[0];
-      if (!firstPromptRow) {
-        throw new ValidationError('コンテストのプロンプト定義が不正です。');
+      const assignedIds = new Set(assignments.map((assignment) => assignment.promptId));
+      const remainingPrompts = promptRows.filter((row) => !assignedIds.has(row.promptId));
+      const candidatePrompts = remainingPrompts.length > 0 ? remainingPrompts : promptRows;
+      const lastAssignment = assignments.at(-1);
+      let nextPromptRow = pickRandomPrompt(candidatePrompts);
+      if (lastAssignment && candidatePrompts.length > 1 && nextPromptRow.promptId === lastAssignment.promptId) {
+        const alternativeCandidates = candidatePrompts.filter((row) => row.promptId !== lastAssignment.promptId);
+        if (alternativeCandidates.length > 0) {
+          nextPromptRow = pickRandomPrompt(alternativeCandidates);
+        }
       }
-      const lastPromptId = lastAssignment?.promptId ?? firstPromptRow.promptId;
-      const lastPromptIndex = promptRows.findIndex((row) => row.promptId === lastPromptId);
-      if (lastPromptIndex === -1) {
-        throw new ValidationError('セッションで利用するプロンプトがコンテストの設定と一致しません。');
-      }
-      const nextPromptRow = promptRows[(lastPromptIndex + (lastAssignment ? 1 : 0)) % promptRows.length];
       if (!nextPromptRow) {
         throw new ValidationError('コンテストのプロンプト定義が不正です。');
       }

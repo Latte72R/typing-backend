@@ -323,7 +323,11 @@ export class TypingStore {
         throw new NotFoundError('コンテストに紐づくプロンプトが設定されていません。');
       }
       const promptIndex = entry.attemptsUsed % promptRows.length;
-      const prompt = mapContestPrompt(promptRows[promptIndex]!);
+      const selectedPromptRow = promptRows[promptIndex];
+      if (!selectedPromptRow) {
+        throw new ValidationError('コンテストのプロンプト定義が不正です。');
+      }
+      const prompt = mapContestPrompt(selectedPromptRow);
       const sessionId = randomUUID();
       const startedAt = now.toISOString();
       await tx.session.create({
@@ -400,12 +404,19 @@ export class TypingStore {
         const prompt = promptMap.get(assignment.promptId)?.prompt;
         return sum + (prompt?.typingTarget.length ?? 0);
       }, 0);
-      const lastPromptId = lastAssignment?.promptId ?? promptRows[0]!.promptId;
+      const firstPromptRow = promptRows[0];
+      if (!firstPromptRow) {
+        throw new ValidationError('コンテストのプロンプト定義が不正です。');
+      }
+      const lastPromptId = lastAssignment?.promptId ?? firstPromptRow.promptId;
       const lastPromptIndex = promptRows.findIndex((row) => row.promptId === lastPromptId);
       if (lastPromptIndex === -1) {
         throw new ValidationError('セッションで利用するプロンプトがコンテストの設定と一致しません。');
       }
-      const nextPromptRow = promptRows[(lastPromptIndex + (lastAssignment ? 1 : 0)) % promptRows.length]!;
+      const nextPromptRow = promptRows[(lastPromptIndex + (lastAssignment ? 1 : 0)) % promptRows.length];
+      if (!nextPromptRow) {
+        throw new ValidationError('コンテストのプロンプト定義が不正です。');
+      }
       const nextPrompt = mapContestPrompt(nextPromptRow);
       const projectedTotal = assignedCharCount + nextPrompt.typingTarget.length;
       if (projectedTotal > MAX_SESSION_PROMPT_TOTAL) {

@@ -170,7 +170,8 @@ test('POST /api/v1/contests はトークン未付与で 401 を返す', async (t
 
 test('POST /api/v1/contests は userId 欠落トークンで 401 を返す', async (t) => {
   const { server, stubs } = await createTestServer(t);
-  const invalidToken = server.jwt.sign({ role: 'admin' } as any);
+  const invalidPayload: Record<string, unknown> = { role: 'admin' };
+  const invalidToken = server.jwt.sign(invalidPayload);
 
   const response = await server.inject({
     method: 'POST',
@@ -211,7 +212,8 @@ test('POST /api/v1/contests/:contestId/sessions はトークン未付与で 401 
 
 test('POST /api/v1/contests/:contestId/sessions は userId 欠落トークンで 401 を返す', async (t) => {
   const { server, stubs } = await createTestServer(t);
-  const invalidToken = server.jwt.sign({ role: 'user' } as any);
+  const invalidPayload: Record<string, unknown> = { role: 'user' };
+  const invalidToken = server.jwt.sign(invalidPayload);
 
   const response = await server.inject({
     method: 'POST',

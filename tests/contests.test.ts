@@ -102,7 +102,7 @@ function createDependencies(options: CreateServerOptions) {
   for (const prompt of options.prompts ?? []) {
     promptCatalog.set(prompt.id, prompt);
   }
-  let promptRecords = new Map<string, PromptRecord>(promptCatalog);
+  const promptRecords = new Map<string, PromptRecord>(promptCatalog);
   let contestPromptRecords: ContestPromptRecord[] = [];
   let sessionRecords = options.sessions ? [...options.sessions] : [];
   let entryRecords = options.entries ? [...options.entries] : [];

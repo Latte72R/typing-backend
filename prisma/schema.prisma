@@ -173,7 +173,6 @@ model SessionPrompt {
   prompt  Prompt  @relation(fields: [promptId], references: [id])
 
   @@id([sessionId, orderIndex])
-  @@unique([sessionId, promptId], map: "session_prompts_session_prompt_idx")
   @@index([sessionId], map: "session_prompts_session_idx")
   @@map("session_prompts")
 }

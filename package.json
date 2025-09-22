@@ -12,7 +12,7 @@
     "dev": "TS_NODE_TRANSPILE_ONLY=1 node --loader ts-node/esm src/server/main.ts",
     "build": "tsc -p tsconfig.build.json",
     "test": "node --loader ts-node/esm --test tests/**/*.test.ts",
-    "lint": "biome lint .",
+    "lint": "biome lint src tests prisma scripts package.json biome.json",
     "format": "biome format .",
     "start": "node dist/server/main.js",
     "seed:prompts": "ts-node --esm scripts/bulkImportPrompts.ts"

@@ -7,7 +7,7 @@ import { Server as SocketIOServer } from 'socket.io';
 
 import type { ServerConfig } from './config.js';
 import type { ServerDependencies } from './dependencies.js';
-import { getJwtUser, normalizeJwtUser, type JwtUser } from './auth/jwtUser.js';
+import { getJwtUser, normalizeJwtUser } from './auth/jwtUser.js';
 import type { FastifyZodInstance, FastifyZodPlugin } from './fastifyTypes.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerContestRoutes } from './routes/contests.js';
@@ -142,7 +142,7 @@ export async function buildServer({ config, dependencies }: BuildServerOptions):
     validationContext?: string;
   };
 
-  fastify.setErrorHandler((error, request, reply) => {
+  fastify.setErrorHandler((error, _request, reply) => {
     const validationError = error as FastifyValidationError;
     if (validationError.validation && validationError.validationContext === 'params') {
       const invalidUuid = validationError.validation.find((issue) => issue.keyword === 'invalid_format' && issue.params?.format === 'uuid');
